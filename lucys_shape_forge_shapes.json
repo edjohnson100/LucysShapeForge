@@ -1,0 +1,416 @@
+{
+  "Dice": [
+    {
+      "shape_id": "d3",
+      "label": "D3 — Triangular Prism",
+      "category": "Dice",
+      "faces": 5,
+      "vertices": 6,
+      "description": "A triangular prism used as a three-sided die when rolled on its rectangular faces. It is one of the simplest prism-based dice."
+    },
+    {
+      "shape_id": "d4",
+      "label": "D4 — Tetrahedron",
+      "category": "Dice",
+      "faces": 4,
+      "vertices": 4,
+      "description": "The classic four-sided die. It is one of the five Platonic solids, with all faces equal equilateral triangles."
+    },
+    {
+      "shape_id": "d6",
+      "label": "D6 — Cube (Hexahedron)",
+      "category": "Dice",
+      "faces": 6,
+      "vertices": 8,
+      "description": "The familiar six-sided die. The cube is the most common gaming die and one of the Platonic solids."
+    },
+    {
+      "shape_id": "d8",
+      "label": "D8 — Octahedron",
+      "category": "Dice",
+      "faces": 8,
+      "vertices": 6,
+      "description": "An eight-sided die with triangular faces. The octahedron is the dual of the cube."
+    },
+    {
+      "shape_id": "d10",
+      "label": "D10 — Pentagonal Trapezohedron",
+      "category": "Dice",
+      "faces": 10,
+      "vertices": 12,
+      "description": "The standard ten-sided die used in many RPG systems. Its kite-shaped faces make it distinct from the Platonic and Archimedean solids."
+    },
+    {
+      "shape_id": "d12",
+      "label": "D12 — Dodecahedron",
+      "category": "Dice",
+      "faces": 12,
+      "vertices": 20,
+      "description": "A twelve-sided die with pentagonal faces. It is one of the five Platonic solids and the dual of the icosahedron."
+    },
+    {
+      "shape_id": "d20",
+      "label": "D20 — Icosahedron",
+      "category": "Dice",
+      "faces": 20,
+      "vertices": 12,
+      "description": "The iconic twenty-sided die. It is a Platonic solid with 20 triangular faces and is the dual of the dodecahedron."
+    },
+    {
+      "shape_id": "d24_deltoidal_icositetrahedron",
+      "label": "D24 — Deltoidal Icositetrahedron",
+      "category": "Dice",
+      "faces": 24,
+      "vertices": 26,
+      "description": "A 24-faced Catalan solid with kite-shaped faces. It appears in specialty dice sets and is the dual of the rhombicuboctahedron."
+    },
+    {
+      "shape_id": "d30_rhombic_triacontahedron",
+      "label": "D30 — Rhombic Triacontahedron",
+      "category": "Dice",
+      "faces": 30,
+      "vertices": 32,
+      "description": "A 30-sided die with rhombic faces. It is a Catalan solid and a favorite in collector and specialty dice sets."
+    },
+    {
+      "shape_id": "d100",
+      "label": "D100 — Percentile Die",
+      "category": "Dice",
+      "faces": 10,
+      "vertices": 12,
+      "description": "Usually the same geometry as a D10, but numbered by tens from 00 to 90 for percentile rolls."
+    }
+  ],
+  "Polyhedra": [
+    {
+      "shape_id": "tetrahedron",
+      "label": "Tetrahedron",
+      "category": "Polyhedra",
+      "faces": 4,
+      "vertices": 4,
+      "description": "The simplest convex polyhedron. Every face is an equilateral triangle."
+    },
+    {
+      "shape_id": "cube",
+      "label": "Cube",
+      "category": "Polyhedra",
+      "faces": 6,
+      "vertices": 8,
+      "description": "Also called a hexahedron. Its square faces make it a useful baseline for many geometric constructions."
+    },
+    {
+      "shape_id": "octahedron",
+      "label": "Octahedron",
+      "category": "Polyhedra",
+      "faces": 8,
+      "vertices": 6,
+      "description": "A Platonic solid made from eight equilateral triangles. It is the dual of the cube."
+    },
+    {
+      "shape_id": "dodecahedron",
+      "label": "Dodecahedron",
+      "category": "Polyhedra",
+      "faces": 12,
+      "vertices": 20,
+      "description": "A Platonic solid with twelve pentagonal faces. It has a strong visual connection to fantasy dice and classic sacred geometry."
+    },
+    {
+      "shape_id": "icosahedron",
+      "label": "Icosahedron",
+      "category": "Polyhedra",
+      "faces": 20,
+      "vertices": 12,
+      "description": "A Platonic solid with twenty triangular faces. It provides one of the most spherical-looking forms among the regular solids."
+    },
+    {
+      "shape_id": "truncated_icosahedron",
+      "label": "Truncated Icosahedron",
+      "category": "Polyhedra",
+      "faces": 32,
+      "vertices": 60,
+      "description": "Famous as the classic soccer-ball pattern, with 12 pentagons and 20 hexagons. It is also the structure associated with buckminsterfullerene."
+    },
+    {
+      "shape_id": "cuboctahedron",
+      "label": "Cuboctahedron",
+      "category": "Polyhedra",
+      "faces": 14,
+      "vertices": 12,
+      "description": "An Archimedean solid with 8 triangles and 6 squares. It can be formed by truncating a cube or octahedron to the midpoint of each edge."
+    },
+    {
+      "shape_id": "icosidodecahedron",
+      "label": "Icosidodecahedron",
+      "category": "Polyhedra",
+      "faces": 32,
+      "vertices": 30,
+      "description": "An Archimedean solid with 20 triangles and 12 pentagons. It sits beautifully between the icosahedron and dodecahedron."
+    },
+    {
+      "shape_id": "rhombic_dodecahedron",
+      "label": "Rhombic Dodecahedron",
+      "category": "Polyhedra",
+      "faces": 12,
+      "vertices": 14,
+      "description": "A Catalan solid with 12 rhombic faces. It tessellates space, which makes it interesting for lattice and packing studies."
+    },
+    {
+      "shape_id": "triakis_tetrahedron",
+      "label": "Triakis Tetrahedron",
+      "category": "Polyhedra",
+      "faces": 12,
+      "vertices": 8,
+      "description": "A Catalan solid created by attaching a pyramid to each face of a tetrahedron. It is the dual of the truncated tetrahedron."
+    }
+  ],
+  "Prisms & Antiprisms": [
+    {
+      "shape_id": "triangular_prism",
+      "label": "Triangular Prism",
+      "category": "Prisms & Antiprisms",
+      "faces": 5,
+      "vertices": 6,
+      "description": "The simplest prism, made from two triangles joined by three rectangles. It is also commonly used as a D3."
+    },
+    {
+      "shape_id": "pentagonal_prism",
+      "label": "Pentagonal Prism",
+      "category": "Prisms & Antiprisms",
+      "faces": 7,
+      "vertices": 10,
+      "description": "A prism built from two pentagons connected by five rectangles. Good for exploring n-gonal prism families."
+    },
+    {
+      "shape_id": "hexagonal_prism",
+      "label": "Hexagonal Prism",
+      "category": "Prisms & Antiprisms",
+      "faces": 8,
+      "vertices": 12,
+      "description": "A six-sided prism that extends the same pattern as the triangular and pentagonal prisms. Useful in honeycomb-inspired forms."
+    },
+    {
+      "shape_id": "octagonal_prism",
+      "label": "Octagonal Prism",
+      "category": "Prisms & Antiprisms",
+      "faces": 10,
+      "vertices": 16,
+      "description": "An eight-sided prism with a more rounded visual feel. It is a nice bridge between polygonal and near-cylindrical forms."
+    },
+    {
+      "shape_id": "square_antiprism",
+      "label": "Square Antiprism",
+      "category": "Prisms & Antiprisms",
+      "faces": 10,
+      "vertices": 8,
+      "description": "Built from two squares rotated relative to each other and connected by triangles. It is the simplest true antiprism."
+    },
+    {
+      "shape_id": "pentagonal_antiprism",
+      "label": "Pentagonal Antiprism",
+      "category": "Prisms & Antiprisms",
+      "faces": 12,
+      "vertices": 10,
+      "description": "A five-sided antiprism with a nice twisted, energetic look. It is often more visually dynamic than the matching prism."
+    },
+    {
+      "shape_id": "hexagonal_antiprism",
+      "label": "Hexagonal Antiprism",
+      "category": "Prisms & Antiprisms",
+      "faces": 14,
+      "vertices": 12,
+      "description": "A six-sided antiprism with a strong geometric rhythm. It is useful for exploring twist-based form generation."
+    }
+  ],
+  "Archimedean Solids": [
+    {
+      "shape_id": "truncated_tetrahedron",
+      "label": "Truncated Tetrahedron",
+      "category": "Archimedean Solids",
+      "faces": 8,
+      "vertices": 12,
+      "description": "Created by slicing the corners off a tetrahedron. It has 4 triangles and 4 hexagons."
+    },
+    {
+      "shape_id": "cuboctahedron",
+      "label": "Cuboctahedron",
+      "category": "Archimedean Solids",
+      "faces": 14,
+      "vertices": 12,
+      "description": "An Archimedean solid with both square and triangular faces. It is one of the cleanest examples of a uniform mixed-face solid."
+    },
+    {
+      "shape_id": "truncated_cube",
+      "label": "Truncated Cube",
+      "category": "Archimedean Solids",
+      "faces": 14,
+      "vertices": 24,
+      "description": "Formed by cutting the corners off a cube. It has 8 triangles and 6 octagons."
+    },
+    {
+      "shape_id": "truncated_octahedron",
+      "label": "Truncated Octahedron",
+      "category": "Archimedean Solids",
+      "faces": 14,
+      "vertices": 24,
+      "description": "A uniform solid with 8 hexagons and 6 squares. It can tessellate space, which makes it especially interesting for 3D packing."
+    },
+    {
+      "shape_id": "rhombicuboctahedron",
+      "label": "Rhombicuboctahedron",
+      "category": "Archimedean Solids",
+      "faces": 26,
+      "vertices": 24,
+      "description": "An Archimedean solid with 18 squares and 8 triangles. Its name is intimidating, but its face pattern is very orderly."
+    },
+    {
+      "shape_id": "icosidodecahedron",
+      "label": "Icosidodecahedron",
+      "category": "Archimedean Solids",
+      "faces": 32,
+      "vertices": 30,
+      "description": "A balanced blend of the icosahedron and dodecahedron, with both triangles and pentagons."
+    },
+    {
+      "shape_id": "truncated_dodecahedron",
+      "label": "Truncated Dodecahedron",
+      "category": "Archimedean Solids",
+      "faces": 32,
+      "vertices": 60,
+      "description": "Made by truncating a dodecahedron. It has 12 decagons and 20 triangles."
+    },
+    {
+      "shape_id": "truncated_icosahedron",
+      "label": "Truncated Icosahedron",
+      "category": "Archimedean Solids",
+      "faces": 32,
+      "vertices": 60,
+      "description": "One of the most famous Archimedean solids. Its soccer-ball structure makes it instantly recognizable."
+    }
+  ],
+  "Catalan / Dual Solids": [
+    {
+      "shape_id": "rhombic_dodecahedron",
+      "label": "Rhombic Dodecahedron",
+      "category": "Catalan / Dual Solids",
+      "faces": 12,
+      "vertices": 14,
+      "description": "The dual of the cuboctahedron. It fills space without gaps, making it important in tessellation and crystallography."
+    },
+    {
+      "shape_id": "triakis_tetrahedron",
+      "label": "Triakis Tetrahedron",
+      "category": "Catalan / Dual Solids",
+      "faces": 12,
+      "vertices": 8,
+      "description": "The dual of the truncated tetrahedron. It looks like a tetrahedron reinforced with triangular spikes."
+    },
+    {
+      "shape_id": "tetrakis_hexahedron",
+      "label": "Tetrakis Hexahedron",
+      "category": "Catalan / Dual Solids",
+      "faces": 24,
+      "vertices": 14,
+      "description": "The dual of the truncated octahedron. It can be visualized as a cube with a pyramid added to each face."
+    },
+    {
+      "shape_id": "deltoidal_icositetrahedron",
+      "label": "Deltoidal Icositetrahedron",
+      "category": "Catalan / Dual Solids",
+      "faces": 24,
+      "vertices": 26,
+      "description": "The dual of the rhombicuboctahedron. Its 24 kite faces make it a great specialty-die candidate."
+    },
+    {
+      "shape_id": "rhombic_triacontahedron",
+      "label": "Rhombic Triacontahedron",
+      "category": "Catalan / Dual Solids",
+      "faces": 30,
+      "vertices": 32,
+      "description": "The dual of the icosidodecahedron. It has 30 rhombic faces and a very rich, faceted appearance."
+    }
+  ],
+  "Experimental": [
+    {
+      "shape_id": "stellated_octahedron",
+      "label": "Stellated Octahedron",
+      "category": "Experimental",
+      "faces": 24,
+      "vertices": 14,
+      "description": "Also known as the stella octangula. It can be seen as two interpenetrating tetrahedra and has a strong star-like silhouette."
+    },
+    {
+      "shape_id": "simple_icosahedron_stellation",
+      "label": "Stellation of Icosahedron",
+      "category": "Experimental",
+      "faces": 60,
+      "vertices": 32,
+      "description": "A curated stellated form based on the icosahedron. Exact topology can vary by implementation, which is part of the fun."
+    },
+    {
+      "shape_id": "twisted_prism",
+      "label": "Twisted Prism",
+      "category": "Experimental",
+      "faces": null,
+      "vertices": null,
+      "description": "A parametric prism with rotational offset between its ends. Face and vertex counts depend on the chosen base polygon."
+    },
+    {
+      "shape_id": "twisted_antiprism",
+      "label": "Twisted Antiprism",
+      "category": "Experimental",
+      "faces": null,
+      "vertices": null,
+      "description": "A more extreme twist-based form derived from antiprism logic. Counts vary with the chosen polygon and twist rules."
+    },
+    {
+      "shape_id": "gyroelongated_variant",
+      "label": "Gyroelongated Pyramid/Cupola Variant",
+      "category": "Experimental",
+      "faces": null,
+      "vertices": null,
+      "description": "A family of Johnson-style forms created by inserting an antiprism-like band. Exact counts depend on the chosen base form."
+    }
+  ],
+  "Lattices": [
+    {
+      "shape_id": "cubic_lattice_cell",
+      "label": "Cubic Lattice Cell",
+      "category": "Lattices",
+      "faces": 6,
+      "vertices": 8,
+      "description": "A cube-based lattice cell that serves as a simple starting point for repeated structural frameworks."
+    },
+    {
+      "shape_id": "octet_truss_cell",
+      "label": "Octet Truss Cell",
+      "category": "Lattices",
+      "faces": 14,
+      "vertices": 12,
+      "description": "A classic lightweight structural cell that combines tetrahedral and octahedral geometry for high stiffness-to-weight efficiency."
+    },
+    {
+      "shape_id": "diamond_lattice_cell",
+      "label": "Diamond-Style Lattice Cell",
+      "category": "Lattices",
+      "faces": null,
+      "vertices": null,
+      "description": "A lattice inspired by tetrahedral bonding patterns. It is more useful as a node-and-strut structure than as a closed-faced polyhedron."
+    },
+    {
+      "shape_id": "space_frame_node_strut_sample",
+      "label": "Space-Frame Node and Strut Sample",
+      "category": "Lattices",
+      "faces": null,
+      "vertices": null,
+      "description": "A structural sample emphasizing connection logic rather than a single closed solid. Great for maker-oriented framework experiments."
+    },
+    {
+      "shape_id": "honeycomb_prismatic_cell",
+      "label": "Honeycomb-Like Prismatic Cell",
+      "category": "Lattices",
+      "faces": 8,
+      "vertices": 12,
+      "description": "A prismatic cell inspired by hexagonal honeycomb organization. It is efficient, recognizable, and easy to tile in one direction."
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "addin",
+  "id": "8f3c2d4a-6b91-4f7e-9c2a-3d8e5a1b7f42",
+	"author": "Ed Johnson - Making With An EdJ",
+	"description":	{
+		"":	"A parametric geometry and polyhedra generator to create a wireframe sketch, a set of surface patches, or a set of solid bodies ready for editing and 3D printing."
+	},
+  "version": "1.0.0",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+	"editEnabled": true,
+	"iconFilename": "Lucys_Shape_Forge_AppIcon.png"
+}

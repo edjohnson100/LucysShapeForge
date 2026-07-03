@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lucy's Shape Forge</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="wrap">
+        <h2>Lucy's Shape Forge 🔥</h2>
+
+        <div class="theme-row">
+            <div class="theme-field">
+                <label for="themeSelect">Theme</label>
+                <select id="themeSelect">
+                    <option value="" selected>Forge Dark (Default)</option>
+                    <option value="Classic Dark">Classic Dark</option>
+                    <option value="Classic Light">Classic Light</option>
+                    <option value="Ocean">Ocean</option>
+                    <option value="Hacker">Hacker</option>
+                    <option value="Solarized Dark">Solarized Dark</option>
+                    <option value="Gruvbox Light">Gruvbox Light</option>
+                    <option value="Warm Sepia">Warm Sepia</option>
+                    <option value="Solarized Light">Solarized Light</option>
+                    <option value="Hot Pink">Hot Pink</option>
+                </select>
+            </div>
+            <div class="theme-field import-field">
+                <label for="themeImport">Import Theme (.json)</label>
+                <input id="themeImport" type="file" accept="application/json,.json">
+            </div>
+        </div>
+
+        <hr class="divider">
+
+        <div class="field-row">
+            <div class="field">
+                <label for="category">Category</label>
+                <select id="category"></select>
+            </div>
+            <div class="field">
+                <label for="shape">Shape</label>
+                <select id="shape"></select>
+            </div>
+        </div>
+
+        <div id="shapeInfo" class="shape-info"></div>
+
+        <div class="field-row">
+            <div class="field">
+                <label for="edge">Edge Length (mm)</label>
+                <input id="edge" type="number" value="20" step="1">
+            </div>
+            <div class="field">
+                <label for="tol">Tolerance (mm)</label>
+                <input id="tol" type="number" value="0.1" step="0.01">
+            </div>
+        </div>
+
+        <div class="field-row">
+            <div class="field">
+                <label for="outputMode">Output</label>
+                <select id="outputMode">
+                    <option value="sketch" selected>Sketch Only</option>
+                    <option value="surface">Surface Patches</option>
+                    <option value="bodies">Bodies (Pyramids)</option>
+                </select>
+            </div>
+            <div class="field" id="bodiesOptionsField" style="display:none;">
+                <label id="splitBodyRow" class="checkbox-row">
+                    <input id="splitBody" type="checkbox" checked>
+                    Split Body
+                </label>
+
+                <label for="cutOffset" id="cutOffsetLabel" style="display:none;">Cut Offset (mm)</label>
+                <input id="cutOffset" type="number" value="10" step="1" style="display:none;">
+            </div>
+        </div>
+
+        <button id="createBtn" type="button">Create Shape</button>
+
+        <div id="status"></div>
+    </div>
+
+    <script src="main.js"></script>
+</body>
+</html>
