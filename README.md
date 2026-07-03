@@ -6,7 +6,7 @@
 
 <img src="Lucys_Shape_Forge_AppIcon.png" alt="Lucy's Shapr Forge Logo Icon" width="400">
 
-Lucy's Shape Forge is a Fusion add-in that adds a toolbar button opening a small HTML palette. Pick a polyhedron, set an edge length, and generate it directly in your design — as a wireframe sketch, a set of surface patches, or a set of solid bodies ready for editing and 3D printing.
+Lucy's Shape Forge is a Fusion add-in that adds a toolbar button opening a small HTML palette. Once installed and running, you'll find it in the **Utilities** tab (a top-level tab alongside Solid, Surface, Mesh, etc.) — either as a toolbar icon right next to the **ADD-INS** panel's dropdown, or by selecting **Utilities → Add-Ins dropdown → Lucy's Shape Forge**. Pick a polyhedron, set an edge length, and generate it directly in your design — as a wireframe sketch, a set of surface patches, or a set of solid bodies ready for editing and 3D printing.
 
 ## Features
 
@@ -41,7 +41,7 @@ Lucy's Shape Forge requires a quick manual installation. You can choose to insta
    - **Windows:** `%appdata%\Autodesk\Autodesk Fusion 360\API\Addins`
    - **Mac:** `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Addins`
 3. **Open Fusion:** Press `Shift + S` to open the **Scripts and Add-Ins** dialog.
-4. **Run the Add-in:** Make sure the **Add-Ins** filter checkbox is checked. You should see **Lucy's Shape Forge** in the list. You may want to check **Run on Startup** so it loads automatically. Click the **Run** icon — this adds a promoted button to the **Solid** workspace's toolbar. Click that button to open the palette.
+4. **Run the Add-in:** Make sure the **Add-Ins** filter checkbox is checked. You should see **Lucy's Shape Forge** in the list. You may want to check **Run on Startup** so it loads automatically. Click the **Run** icon — this adds a promoted button to the **ADD-INS** panel of the **Utilities** tab (a top-level tab alongside Solid, Surface, Mesh, etc. — not nested inside them; right next to the Add-Ins dropdown). Click that button — or select **Utilities → Add-Ins dropdown → Lucy's Shape Forge** — to open the palette.
 
 #### Option 2: Install in a Custom Directory
 
@@ -52,7 +52,7 @@ Lucy's Shape Forge requires a quick manual installation. You can choose to insta
 3. **Open Fusion:** Press `Shift + S` to open the **Scripts and Add-Ins** dialog.
 4. **Add the Add-in:** Click the grey **"+"** icon next to the search box at the top of the dialog and select **Script or add-in from device**.
 5. **Locate:** Navigate to your custom folder, select the `LucysShapeForge` folder (the one containing `LucysShapeForge.manifest`), and click **Select Folder**.
-6. **Run the Add-in:** Make sure the **Add-Ins** filter checkbox is checked. You should see **Lucy's Shape Forge** in the list. You may want to check **Run on Startup** so it loads automatically. Click the **Run** icon — this adds a promoted button to the **Solid** workspace's toolbar. Click that button to open the palette.
+6. **Run the Add-in:** Make sure the **Add-Ins** filter checkbox is checked. You should see **Lucy's Shape Forge** in the list. You may want to check **Run on Startup** so it loads automatically. Click the **Run** icon — this adds a promoted button to the **ADD-INS** panel of the **Utilities** tab (a top-level tab alongside Solid, Surface, Mesh, etc. — not nested inside them; right next to the Add-Ins dropdown). Click that button — or select **Utilities → Add-Ins dropdown → Lucy's Shape Forge** — to open the palette.
 
 ## Usage
 

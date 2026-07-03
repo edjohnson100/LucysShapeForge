@@ -57,22 +57,6 @@
       "description": "The iconic twenty-sided die. It is a Platonic solid with 20 triangular faces and is the dual of the dodecahedron."
     },
     {
-      "shape_id": "d24_deltoidal_icositetrahedron",
-      "label": "D24 — Deltoidal Icositetrahedron",
-      "category": "Dice",
-      "faces": 24,
-      "vertices": 26,
-      "description": "A 24-faced Catalan solid with kite-shaped faces. It appears in specialty dice sets and is the dual of the rhombicuboctahedron."
-    },
-    {
-      "shape_id": "d30_rhombic_triacontahedron",
-      "label": "D30 — Rhombic Triacontahedron",
-      "category": "Dice",
-      "faces": 30,
-      "vertices": 32,
-      "description": "A 30-sided die with rhombic faces. It is a Catalan solid and a favorite in collector and specialty dice sets."
-    },
-    {
       "shape_id": "d100",
       "label": "D100 — Percentile Die",
       "category": "Dice",
@@ -313,14 +297,6 @@
       "description": "The dual of the truncated octahedron. It can be visualized as a cube with a pyramid added to each face."
     },
     {
-      "shape_id": "deltoidal_icositetrahedron",
-      "label": "Deltoidal Icositetrahedron",
-      "category": "Catalan / Dual Solids",
-      "faces": 24,
-      "vertices": 26,
-      "description": "The dual of the rhombicuboctahedron. Its 24 kite faces make it a great specialty-die candidate."
-    },
-    {
       "shape_id": "rhombic_triacontahedron",
       "label": "Rhombic Triacontahedron",
       "category": "Catalan / Dual Solids",
@@ -337,80 +313,6 @@
       "faces": 24,
       "vertices": 14,
       "description": "Also known as the stella octangula. It can be seen as two interpenetrating tetrahedra and has a strong star-like silhouette."
-    },
-    {
-      "shape_id": "simple_icosahedron_stellation",
-      "label": "Stellation of Icosahedron",
-      "category": "Experimental",
-      "faces": 60,
-      "vertices": 32,
-      "description": "A curated stellated form based on the icosahedron. Exact topology can vary by implementation, which is part of the fun."
-    },
-    {
-      "shape_id": "twisted_prism",
-      "label": "Twisted Prism",
-      "category": "Experimental",
-      "faces": null,
-      "vertices": null,
-      "description": "A parametric prism with rotational offset between its ends. Face and vertex counts depend on the chosen base polygon."
-    },
-    {
-      "shape_id": "twisted_antiprism",
-      "label": "Twisted Antiprism",
-      "category": "Experimental",
-      "faces": null,
-      "vertices": null,
-      "description": "A more extreme twist-based form derived from antiprism logic. Counts vary with the chosen polygon and twist rules."
-    },
-    {
-      "shape_id": "gyroelongated_variant",
-      "label": "Gyroelongated Pyramid/Cupola Variant",
-      "category": "Experimental",
-      "faces": null,
-      "vertices": null,
-      "description": "A family of Johnson-style forms created by inserting an antiprism-like band. Exact counts depend on the chosen base form."
-    }
-  ],
-  "Lattices": [
-    {
-      "shape_id": "cubic_lattice_cell",
-      "label": "Cubic Lattice Cell",
-      "category": "Lattices",
-      "faces": 6,
-      "vertices": 8,
-      "description": "A cube-based lattice cell that serves as a simple starting point for repeated structural frameworks."
-    },
-    {
-      "shape_id": "octet_truss_cell",
-      "label": "Octet Truss Cell",
-      "category": "Lattices",
-      "faces": 14,
-      "vertices": 12,
-      "description": "A classic lightweight structural cell that combines tetrahedral and octahedral geometry for high stiffness-to-weight efficiency."
-    },
-    {
-      "shape_id": "diamond_lattice_cell",
-      "label": "Diamond-Style Lattice Cell",
-      "category": "Lattices",
-      "faces": null,
-      "vertices": null,
-      "description": "A lattice inspired by tetrahedral bonding patterns. It is more useful as a node-and-strut structure than as a closed-faced polyhedron."
-    },
-    {
-      "shape_id": "space_frame_node_strut_sample",
-      "label": "Space-Frame Node and Strut Sample",
-      "category": "Lattices",
-      "faces": null,
-      "vertices": null,
-      "description": "A structural sample emphasizing connection logic rather than a single closed solid. Great for maker-oriented framework experiments."
-    },
-    {
-      "shape_id": "honeycomb_prismatic_cell",
-      "label": "Honeycomb-Like Prismatic Cell",
-      "category": "Lattices",
-      "faces": 8,
-      "vertices": 12,
-      "description": "A prismatic cell inspired by hexagonal honeycomb organization. It is efficient, recognizable, and easy to tile in one direction."
     }
   ]
 }
