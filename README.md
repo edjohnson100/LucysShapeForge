@@ -4,6 +4,8 @@
 
 **Author:** Ed Johnson (Making With An EdJ)
 
+<img src="Lucys_Shape_Forge_AppIcon.png" alt="Lucy's Shapr Forge Logo Icon" width="600">
+
 Lucy's Shape Forge is a Fusion add-in that adds a toolbar button opening a small HTML palette. Pick a polyhedron, set an edge length, and generate it directly in your design — as a wireframe sketch, a set of surface patches, or a set of solid bodies ready for editing and 3D printing.
 
 ## Features
@@ -32,8 +34,9 @@ Lucy's Shape Forge requires a quick manual installation. You can choose to insta
 
 #### Option 1: Install in the Default Fusion Directory
 
-1. **Download:** Download the source code as a ZIP file and extract the `LucysShapeForge-main` folder. **Rename the folder to `LucysShapeForge`** (remove the `-main` suffix) — Fusion requires the folder name to match the add-in name exactly, so it won't run correctly if you skip this step.
-   Download the zip file using the green **Code** button above, or simply click this link: [LucysShapeForge Main Branch](https://github.com/edjohnson100/LucysShapeForge/archive/refs/heads/main.zip)
+1. **Download:** Choose a source:
+   - **Recommended — Latest Release:** Open the **Releases** link in the right-hand sidebar of this repo's GitHub page (or go directly to [Releases](https://github.com/edjohnson100/LucysShapeForge/releases)) and download the `LucysShapeForge-vX.X.X.zip` asset from the latest release, then extract it — the folder inside is already named `LucysShapeForge`, no renaming needed. Note: the latest release may not include the newest changes on `main` yet.
+   - **Latest `main` branch:** Download the source code as a ZIP file and extract the `LucysShapeForge-main` folder. **Rename the folder to `LucysShapeForge`** (remove the `-main` suffix) — Fusion requires the folder name to match the add-in name exactly, so it won't run correctly if you skip this step. Download the zip using the green **Code** button above, or click this link: [LucysShapeForge Main Branch](https://github.com/edjohnson100/LucysShapeForge/archive/refs/heads/main.zip)
 2. **Move the Folder:** Move the entire `LucysShapeForge` folder into your native Fusion Add-Ins directory:
    - **Windows:** `%appdata%\Autodesk\Autodesk Fusion 360\API\Addins`
    - **Mac:** `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Addins`
@@ -42,7 +45,9 @@ Lucy's Shape Forge requires a quick manual installation. You can choose to insta
 
 #### Option 2: Install in a Custom Directory
 
-1. **Download:** Download the source code as a ZIP file and extract the `LucysShapeForge-main` folder. **Rename the folder to `LucysShapeForge`** (remove the `-main` suffix) — Fusion requires the folder name to match the add-in name exactly, so it won't run correctly if you skip this step.
+1. **Download:** Choose a source:
+   - **Recommended — Latest Release:** Open the **Releases** link in the right-hand sidebar of this repo's GitHub page (or go directly to [Releases](https://github.com/edjohnson100/LucysShapeForge/releases)) and download the `LucysShapeForge-vX.X.X.zip` asset from the latest release, then extract it — the folder inside is already named `LucysShapeForge`, no renaming needed. Note: the latest release may not include the newest changes on `main` yet.
+   - **Latest `main` branch:** Download the source code as a ZIP file and extract the `LucysShapeForge-main` folder. **Rename the folder to `LucysShapeForge`** (remove the `-main` suffix) — Fusion requires the folder name to match the add-in name exactly, so it won't run correctly if you skip this step. Download the zip using the green **Code** button above, or click this link: [LucysShapeForge Main Branch](https://github.com/edjohnson100/LucysShapeForge/archive/refs/heads/main.zip)
 2. **Organize:** Create a dedicated folder on your computer for your Fusion tools (e.g., `Documents\Fusion_Tools`) and move the `LucysShapeForge` folder inside it.
 3. **Open Fusion:** Press `Shift + S` to open the **Scripts and Add-Ins** dialog.
 4. **Add the Add-in:** Click the grey **"+"** icon next to the search box at the top of the dialog and select **Script or add-in from device**.
