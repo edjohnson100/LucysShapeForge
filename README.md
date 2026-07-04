@@ -81,3 +81,14 @@ Autodesk Fusion (Windows or macOS). No other dependencies — this is pure Pytho
 ## License
 
 [MIT](LICENSE) — © 2026 Ed Johnson.
+
+---
+
+## ❤️ Support the Maker (and Lucy!)
+
+I develop these tools to improve my own workflows and love sharing them with the community. If you find Lucy's Shape Forge useful and want to say thanks, feel free to **[buy Lucy a dog treat on Ko-fi](https://ko-fi.com/makingwithanedj)**!
+
+***
+
+*Happy Making!*
+*— EdJ*
