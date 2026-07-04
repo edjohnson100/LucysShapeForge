@@ -1045,7 +1045,7 @@ SHAPE_REGISTRY = {
 def _load_shape_info():
     # Flattens the curated content catalog (lucys_shape_forge_shapes.json) into a
     # {shape_id: {...}} lookup keyed by shape_id -- ids are consistent across
-    # categories for shapes appearing in more than one (e.g. cuboctahedron
+    # categories for shapes appearing in more than one (e.g. truncated_icosahedron
     # appears under both Polyhedra and Archimedean Solids with identical
     # content), so flattening is safe. Returns {} (not a crash) if the file is
     # missing or malformed, since this is a purely cosmetic info panel --

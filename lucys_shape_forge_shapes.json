@@ -115,36 +115,12 @@
       "description": "Famous as the classic soccer-ball pattern, with 12 pentagons and 20 hexagons. It is also the structure associated with buckminsterfullerene."
     },
     {
-      "shape_id": "cuboctahedron",
-      "label": "Cuboctahedron",
+      "shape_id": "pentagonal_trapezohedron",
+      "label": "Pentagonal Trapezohedron",
       "category": "Polyhedra",
-      "faces": 14,
+      "faces": 10,
       "vertices": 12,
-      "description": "An Archimedean solid with 8 triangles and 6 squares. It can be formed by truncating a cube or octahedron to the midpoint of each edge."
-    },
-    {
-      "shape_id": "icosidodecahedron",
-      "label": "Icosidodecahedron",
-      "category": "Polyhedra",
-      "faces": 32,
-      "vertices": 30,
-      "description": "An Archimedean solid with 20 triangles and 12 pentagons. It sits beautifully between the icosahedron and dodecahedron."
-    },
-    {
-      "shape_id": "rhombic_dodecahedron",
-      "label": "Rhombic Dodecahedron",
-      "category": "Polyhedra",
-      "faces": 12,
-      "vertices": 14,
-      "description": "A Catalan solid with 12 rhombic faces. It tessellates space, which makes it interesting for lattice and packing studies."
-    },
-    {
-      "shape_id": "triakis_tetrahedron",
-      "label": "Triakis Tetrahedron",
-      "category": "Polyhedra",
-      "faces": 12,
-      "vertices": 8,
-      "description": "A Catalan solid created by attaching a pyramid to each face of a tetrahedron. It is the dual of the truncated tetrahedron."
+      "description": "A trapezohedron with ten congruent kite-shaped faces meeting at two apex vertices. Unlike the Platonic solids here, its faces are not regular polygons."
     }
   ],
   "Prisms & Antiprisms": [
@@ -268,7 +244,7 @@
       "category": "Archimedean Solids",
       "faces": 32,
       "vertices": 60,
-      "description": "One of the most famous Archimedean solids. Its soccer-ball structure makes it instantly recognizable."
+      "description": "Famous as the classic soccer-ball pattern, with 12 pentagons and 20 hexagons. It is also the structure associated with buckminsterfullerene."
     }
   ],
   "Catalan / Dual Solids": [
