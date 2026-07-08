@@ -8,6 +8,16 @@
 
 Lucy's Shape Forge is a Fusion add-in that adds a toolbar button opening a small HTML palette. Once installed and running, you'll find it in the **Utilities** tab (a top-level tab alongside Solid, Surface, Mesh, etc.) — either as a toolbar icon right next to the **ADD-INS** panel's dropdown, or by selecting **Utilities → Add-Ins dropdown → Lucy's Shape Forge**. Pick a polyhedron, set an edge length, and generate it directly in your design — as a wireframe sketch, a set of surface patches, or a set of solid bodies ready for editing and 3D printing.
 
+## 🆕 What's New in v1.1.0
+
+- **Rounded exterior** for Bodies mode — domes each panel out to the shape's circumsphere via a boolean intersection, while every true vertex stays exactly fixed, for a smooth "faceted ball" look instead of flat panels.
+- **Seam Fillet** — rounds over the seam between panels. Two styles: a simple **Constant**-radius edge fillet (works on both Flat and Rounded exteriors), or an **Asymmetric** fillet tuned to a Rounded shape's own sphere geometry for a closer blend. A **Seam Tightness** field scales either style.
+- **Live value preview** — the palette now shows the actual fillet radius/offsets that current settings will produce, and proactively warns if Rounded isn't available for the selected shape or if Cut Offset is too large, before you click Create.
+- **Group in Timeline** — an optional checkbox that collapses a shape's (often dozens of) Patch/Loft/Stitch/Split/Combine/Fillet timeline entries into a single expandable/collapsible group.
+- **Bodies/Surface bodies are now named by polygon type** (`Hexagon1`, `Pentagon1`, ...) instead of Fusion's generic `Body1`, `Body2`.
+- **The palette remembers your last session** — theme, every shape-creation setting, and the palette window's size/position/dock state all persist across Fusion restarts (stored in a local, untracked `lucys_shape_forge_config.json`).
+- Cut Offset now defaults to 25% of Edge Length (previously 50%).
+
 ## Features
 
 - **6 categories, 30+ shapes**, all generated from exact vertex math (no imported meshes):
@@ -22,7 +32,7 @@ Lucy's Shape Forge is a Fusion add-in that adds a toolbar button opening a small
 - **Three output types**, chosen per shape:
   - **Sketch Only** — a 3D wireframe sketch (vertices + edges).
   - **Surface Patches** — a flat surface patch for every face, with face normals auto-corrected to point outward.
-  - **Bodies (Pyramids)** — a solid body per face, optionally trimmed down to a thin face-hugging shell (rather than a solid wedge to the center) via a **Cut Offset** — the math keeps every seam between faces aligned, even between different polygon types (e.g. the pentagons and hexagons of the truncated icosahedron).
+  - **Bodies (Pyramids)** — a solid body per face, optionally trimmed down to a thin face-hugging shell (rather than a solid wedge to the center) via a **Cut Offset** — the math keeps every seam between faces aligned, even between different polygon types (e.g. the pentagons and hexagons of the truncated icosahedron). Choose a **Flat** or **Rounded** exterior (Rounded domes each panel out to the shape's circumsphere), and optionally add a **Seam Fillet** (Constant or Asymmetric) to smooth the seam between panels — the palette previews the actual computed values live before you create anything. Bodies (and Surface Patches) are named by polygon type (`Hexagon1`, `Pentagon1`, ...), and an optional **Group in Timeline** checkbox collapses each shape's timeline entries into one expandable group.
 - **Each shape is created in its own new component**, named `{Shape}_{EdgeLength}` (e.g. `Cube_2`), so generating several shapes side by side never collides.
 - **Themeable palette**: a Theme dropdown with 9 built-in looks, plus the ability to import a custom `.theme.json` exported from the author's companion tool, [Theme Designer Pro](https://github.com/edjohnson100/ThemeDesigner).
 
@@ -61,10 +71,10 @@ Lucy's Shape Forge requires a quick manual installation. You can choose to insta
 3. Choose an **Output** type:
    - *Sketch Only* — nothing further to configure.
    - *Surface Patches* — nothing further to configure.
-   - *Bodies (Pyramids)* — leave **Split Body** checked to cut each face down to a thin shell panel (adjust **Cut Offset** for shell thickness), or uncheck it to keep the full solid pyramids.
+   - *Bodies (Pyramids)* — leave **Split Body** checked to cut each face down to a thin shell panel (adjust **Cut Offset** for shell thickness), or uncheck it to keep the full solid pyramids. Choose **Exterior**: *Flat* (the true polyhedron faces) or *Rounded* (domes each panel out to the shape's circumsphere — only available for shapes where every vertex is the same distance from center). Check **Seam Fillet** to smooth the seam between panels, pick a **Fillet Style** (*Constant* or, on Rounded shapes, *Asymmetric*), and adjust **Seam Tightness** to taste — the palette shows the actual radius/offset values that will be used, live, so you can dial it in before creating anything. Check **Group in Timeline** to collapse the shape's many timeline entries into one expandable group.
 4. Click **Create Shape**. The status line below the button confirms once the shape is done, along with how long it took.
 
-To customize the palette's look, use the **Theme** dropdown, or export a theme from [Theme Designer Pro's live site](https://edjohnson100.github.io/ThemeDesigner/) and load it with **Import Theme (.json)**.
+To customize the palette's look, use the **Theme** dropdown, or export a theme from [Theme Designer Pro's live site](https://edjohnson100.github.io/ThemeDesigner/) and load it with **Import Theme (.json)**. The palette remembers your theme, last shape settings, and window size/position across Fusion sessions.
 
 ## Repo layout
 

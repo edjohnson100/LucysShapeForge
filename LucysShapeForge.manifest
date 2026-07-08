@@ -6,7 +6,7 @@
 	"description":	{
 		"":	"A parametric geometry and polyhedra generator to create a wireframe sketch, a set of surface patches, or a set of solid bodies ready for editing and 3D printing."
 	},
-  "version": "1.0.0",
+  "version": "1.1.0",
   "runOnStartup": false,
   "supportedOS": "windows|mac",
 	"editEnabled": true,

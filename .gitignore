@@ -55,6 +55,10 @@ CLAUDE.md
 Archive/
 resources/plugins.json
 
+# Local, per-install palette preferences (last theme/shape) -- not shipped to
+# the public repo, recreated automatically on first save
+lucys_shape_forge_config.json
+
 # Affiity Desktop
 *.af
 resources/*.af

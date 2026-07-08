@@ -12,6 +12,7 @@ CMD_NAME = "Lucy's Shape Forge"
 CMD_DESC = 'Parametric geometry and polyhedra generator'
 ICON_FOLDER = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'resources').replace('\\', '/')
 SHAPE_INFO_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'lucys_shape_forge_shapes.json')
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'lucys_shape_forge_config.json')
 MM_TO_CM = 0.1  # Fusion's API always works in centimeters internally regardless of the
                 # document's displayed units; the palette collects Edge Length/Tolerance/
                 # Cut Offset in millimeters, so convert once at this boundary.
@@ -112,6 +113,16 @@ def _face_normal_and_area(vertices, face):
     if _vdot(normal, centroid) < 0:  # keep normal pointing outward regardless of trace winding
         normal = _vscale(normal, -1)
     return normal, area
+
+
+_POLYGON_NAMES = {
+    3: 'Triangle', 4: 'Square', 5: 'Pentagon', 6: 'Hexagon', 7: 'Heptagon',
+    8: 'Octagon', 9: 'Nonagon', 10: 'Decagon',
+}
+
+
+def _polygon_name(side_count):
+    return _POLYGON_NAMES.get(side_count, '{}-gon'.format(side_count))
 
 
 def _rotation_aligning(a, b):
@@ -230,10 +241,15 @@ def _fix_patch_body_orientation(component, patch_body, tolerance=1e-6):
 
 
 def _create_surface_patches(component, faces, edge_lines):
+    name_counts = {}
     for face in faces:
         patch = _create_patch(component, _face_edge_collection(face, edge_lines))
         patch_body = patch.bodies.item(0)
-        _fix_patch_body_orientation(component, patch_body)
+        patch_body = _fix_patch_body_orientation(component, patch_body)
+
+        name = _polygon_name(len(face))
+        name_counts[name] = name_counts.get(name, 0) + 1
+        patch_body.name = '{}{}'.format(name, name_counts[name])
 
 
 def _plane_distance_to_world_origin(plane_geom):
@@ -261,6 +277,27 @@ def _offset_plane_toward_origin(component, base_face, offset):
     return plane
 
 
+def _extrude_face_outward(component, face, distance, outward_normal):
+    # Unlike _offset_plane_toward_origin, no build-then-check-then-retry is
+    # needed here: outward_normal is the analytically-correct outward
+    # direction already computed from the polyhedron's own vertices, so a
+    # single dot-product test against Fusion's face normal deterministically
+    # picks the right extrude direction.
+    plane_normal = face.geometry.normal
+    same_direction = (plane_normal.x * outward_normal[0]
+                       + plane_normal.y * outward_normal[1]
+                       + plane_normal.z * outward_normal[2]) >= 0
+    direction = (adsk.fusion.ExtentDirections.PositiveExtentDirection if same_direction
+                 else adsk.fusion.ExtentDirections.NegativeExtentDirection)
+
+    extrudes = component.features.extrudeFeatures
+    extrude_input = extrudes.createInput(face, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+    extent = adsk.fusion.DistanceExtentDefinition.create(adsk.core.ValueInput.createByReal(distance))
+    extrude_input.setOneSideExtent(extent, direction)
+    extrude_feature = extrudes.add(extrude_input)
+    return extrude_feature.bodies.item(0)
+
+
 def _body_center_distance_to_origin(body):
     bb = body.boundingBox
     c = (
@@ -271,16 +308,28 @@ def _body_center_distance_to_origin(body):
     return _vnorm(c)
 
 
-def _pyramid_base_face(body):
-    # The pyramid's lateral faces all pass through the apex (the origin); the
-    # base face is the only one that doesn't.
+def _outer_planar_face(body):
+    # The pyramid's lateral faces all pass through the apex (the origin), so
+    # any planar face that doesn't is a candidate for "the true outer face".
+    # Before a Split Body cut there's only one such candidate. After a split,
+    # the new inner cut-plane face is also non-origin-passing, but it's
+    # always strictly closer to the origin than the true outer face (it sits
+    # between the apex and the original face) -- so picking the MAXIMUM
+    # distance instead of the first match still finds the true outer face in
+    # both cases, making this lookup reusable both for the pre-split offset
+    # plane (which needs the pristine face) and the post-split rounding step
+    # (which needs whatever the current outer boundary is).
+    best_face = None
+    best_dist = 1e-6
     for face in body.faces:
         plane = face.geometry
         if not isinstance(plane, adsk.core.Plane):
             continue
-        if _plane_distance_to_world_origin(plane) > 1e-6:
-            return face
-    return None
+        dist = _plane_distance_to_world_origin(plane)
+        if dist > best_dist:
+            best_dist = dist
+            best_face = face
+    return best_face
 
 
 def _remove_if_valid(component, body):
@@ -316,7 +365,68 @@ def _cut_shrink_fraction(faces, face_heights, cut_offset):
     return min(raw_fraction, 0.95), raw_fraction > 0.95
 
 
-def _create_cut_bodies(component, sketch, vertices, faces, edge_lines, tol, cut_offset, split_body):
+def _circumradius_if_uniform(vertices, tol):
+    # Rounding a face by intersecting with a sphere only leaves every corner
+    # of that face exactly fixed when ALL of the shape's vertices sit on one
+    # common sphere centered at the origin -- true for the Platonic and
+    # Archimedean solids, the uniform prisms/antiprisms, and the stellated
+    # octahedron compound, but not for the Catalan/Experimental shapes with 2
+    # distinct vertex "types" at different radii (rhombic dodecahedron,
+    # triakis tetrahedron, tetrakis hexahedron, rhombic triacontahedron,
+    # pentagonal trapezohedron) -- there, a single face can mix both vertex
+    # types, so no origin-centered sphere passes through all of its corners.
+    radii = [_vnorm(v) for v in vertices]
+    if max(radii) - min(radii) < tol:
+        return sum(radii) / len(radii)
+    return None
+
+
+def _create_rounding_sphere(component, radius):
+    # Fusion's parametric feature API has no primitive "create sphere"
+    # feature (that only exists on the transient/TemporaryBRepManager side,
+    # which this add-in otherwise avoids in favor of ordinary timeline
+    # features) -- build one the standard way instead: a semicircle profile
+    # revolved 360 degrees. A sphere is fully symmetric, so which world axis
+    # the semicircle is drawn against doesn't matter.
+    sketch = component.sketches.add(component.xYConstructionPlane)
+    sketch.isLightBulbOn = False
+    lines = sketch.sketchCurves.sketchLines
+    arcs = sketch.sketchCurves.sketchArcs
+    top = adsk.core.Point3D.create(0, radius, 0)
+    bottom = adsk.core.Point3D.create(0, -radius, 0)
+    side = adsk.core.Point3D.create(radius, 0, 0)
+    axis_line = lines.addByTwoPoints(top, bottom)
+    arcs.addByThreePoints(top, side, bottom)
+
+    revolves = component.features.revolveFeatures
+    revolve_input = revolves.createInput(
+        sketch.profiles.item(0), axis_line, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+    revolve_input.setAngleExtent(False, adsk.core.ValueInput.createByReal(2 * math.pi))
+    revolve_feature = revolves.add(revolve_input)
+    return revolve_feature.bodies.item(0)
+
+
+def _rounded_cap_face(body):
+    # After rounding, a panel's dome cap is the one genuinely spherical face
+    # on that body (the flat side walls and any inner cut face stay planar).
+    for face in body.faces:
+        if isinstance(face.geometry, adsk.core.Sphere):
+            return face
+    return None
+
+
+def _chord_sagitta(R, edge_length):
+    # How far a straight polyhedron edge (a chord between two vertices on the
+    # circumsphere) dips below the sphere at its midpoint -- the geometric
+    # root cause of the seam: two adjacent rounded panels both curve out to
+    # the same sphere, but their flat side walls meet at this sunken chord
+    # instead of following the sphere, leaving a V-groove along every edge.
+    half = edge_length / 2.0
+    return R - math.sqrt(R * R - half * half)
+
+
+def _create_cut_bodies(component, sketch, vertices, faces, edge_lines, tol, cut_offset, split_body, rounded,
+                        seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     # A face-to-point Loft with isSolid=True turned out to silently produce a
     # surface, not a solid (confirmed via live testing), so build the solid
     # pyramid the long way instead: patch the face for a flat base surface,
@@ -328,15 +438,49 @@ def _create_cut_bodies(component, sketch, vertices, faces, edge_lines, tol, cut_
     any_clamped = False
 
     face_heights = []
+    face_normals = []
     for face in faces:
         normal, _ = _face_normal_and_area(vertices, face)
         face_heights.append(abs(_vdot(normal, vertices[face[0]])))
+        face_normals.append(normal)
 
     shrink_fraction = None
     if split_body and cut_offset is not None and cut_offset > 0:
         shrink_fraction, any_clamped = _cut_shrink_fraction(faces, face_heights, cut_offset)
 
-    for face, height in zip(faces, face_heights):
+    # Rounding only leaves every face corner exactly fixed when the whole
+    # shape's vertices share one common circumradius -- see
+    # _circumradius_if_uniform. One sphere is built (if eligible) and reused
+    # across every face via isKeepToolBodies, the same way apex_point above
+    # is a single shared point reused by every face's Loft.
+    circumradius = _circumradius_if_uniform(vertices, tol) if rounded else None
+    rounding_active = bool(rounded) and circumradius is not None
+    rounding_ineligible = bool(rounded) and circumradius is None
+    sphere_body = _create_rounding_sphere(component, circumradius) if rounding_active else None
+
+    # Seam Fillet also works on Flat exteriors -- there it's just a plain
+    # constant-radius fillet on the true polyhedron edges, no different from
+    # filleting any other polyhedron model, so it doesn't need circumradius
+    # eligibility at all. Asymmetric style is Rounded-only (its cap-side
+    # offset is sphere/sagitta-based, see _chord_sagitta), so force Constant
+    # whenever rounding isn't actually active -- whether that's because Flat
+    # was chosen, or because Rounded was requested but this shape turned out
+    # ineligible (rounding_ineligible above).
+    seam_fillet_active = bool(seam_fillet)
+    effective_fillet_style = fillet_style if rounding_active else 'constant'
+
+    # Collected per face below, in whichever shape effective_fillet_style
+    # needs: one flat collection for Constant style (single shared radius
+    # across every panel regardless of face type), or edges/wall-extent
+    # grouped by face-type (side count) for Asymmetric style, since that
+    # style's down-the-wall offset genuinely differs per face type.
+    seam_edges_flat = adsk.core.ObjectCollection.create() if seam_fillet_active else None
+    seam_edges_by_type = {} if seam_fillet_active else None
+    wall_extent_by_type = {} if seam_fillet_active else None
+
+    name_counts = {}
+
+    for face, height, normal in zip(faces, face_heights, face_normals):
         edge_collection = _face_edge_collection(face, edge_lines)
 
         base_patch = _create_patch(component, edge_collection)
@@ -372,31 +516,157 @@ def _create_cut_bodies(component, sketch, vertices, faces, edge_lines, tol, cut_
         if pyramid_body is None:
             continue
 
-        if shrink_fraction is None:
-            continue
+        # Rounding must always apply to whatever body remains AFTER the flat
+        # split-body/cut-offset treatment (unchanged above), never before:
+        # _outer_planar_face only recognizes planar faces, and once rounding
+        # replaces the outer face with a curved dome there'd be no flat face
+        # left for a later split step to reference.
+        working_body = pyramid_body
+        wall_extent = height  # unsplit: the wall reaches all the way to the apex at the origin
 
-        effective_offset = shrink_fraction * height
+        if shrink_fraction is not None:
+            effective_offset = shrink_fraction * height
 
-        cut_ref_face = _pyramid_base_face(pyramid_body)
-        if cut_ref_face is None:
-            continue
+            cut_ref_face = _outer_planar_face(pyramid_body)
+            if cut_ref_face is None:
+                continue
 
-        offset_plane = _offset_plane_toward_origin(component, cut_ref_face, effective_offset)
+            offset_plane = _offset_plane_toward_origin(component, cut_ref_face, effective_offset)
 
-        before_split_tokens = set(b.entityToken for b in component.bRepBodies)
-        split_input = component.features.splitBodyFeatures.createInput(pyramid_body, offset_plane, True)
-        split_feature = component.features.splitBodyFeatures.add(split_input)
-        offset_plane.isLightBulbOn = False  # hide only after Split Body has used it
+            before_split_tokens = set(b.entityToken for b in component.bRepBodies)
+            split_input = component.features.splitBodyFeatures.createInput(pyramid_body, offset_plane, True)
+            split_feature = component.features.splitBodyFeatures.add(split_input)
+            offset_plane.isLightBulbOn = False  # hide only after Split Body has used it
 
-        pieces = list(split_feature.bodies)
-        if not pieces:
-            pieces = [b for b in component.bRepBodies if b.entityToken not in before_split_tokens]
+            pieces = list(split_feature.bodies)
+            if not pieces:
+                pieces = [b for b in component.bRepBodies if b.entityToken not in before_split_tokens]
 
-        if len(pieces) == 2:
-            pieces.sort(key=_body_center_distance_to_origin)
-            _remove_if_valid(component, pieces[0])  # closer-to-origin piece is the discarded tip
+            if len(pieces) == 2:
+                pieces.sort(key=_body_center_distance_to_origin)
+                _remove_if_valid(component, pieces[0])  # closer-to-origin piece is the discarded tip
+                working_body = pieces[1]
+                wall_extent = effective_offset  # split: the wall only reaches the cut plane
+            else:
+                _log('Split Body did not yield 2 pieces for a face; skipping cut for that face.')
 
-    return any_clamped
+        if rounding_active:
+            outer_face = _outer_planar_face(working_body)
+            if outer_face is None:
+                continue
+
+            # The cap must reach at least as far as the sphere everywhere on
+            # its footprint, not just at the face center -- (circumradius -
+            # height) is the exact bulge at the face's own foot-of-
+            # perpendicular point (its farthest point from the flat plane);
+            # + tol is a small safety margin against exact-tangency kernel
+            # fragility at the true (unmoved) corners.
+            bulge = (circumradius - height) + tol
+            cap_body = _extrude_face_outward(component, outer_face, bulge, normal)
+
+            join_tools = adsk.core.ObjectCollection.create()
+            join_tools.add(cap_body)
+            join_input = component.features.combineFeatures.createInput(working_body, join_tools)
+            join_input.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
+            component.features.combineFeatures.add(join_input)
+
+            intersect_tools = adsk.core.ObjectCollection.create()
+            intersect_tools.add(sphere_body)
+            intersect_input = component.features.combineFeatures.createInput(working_body, intersect_tools)
+            intersect_input.operation = adsk.fusion.FeatureOperations.IntersectFeatureOperation
+            intersect_input.isKeepToolBodies = True
+            component.features.combineFeatures.add(intersect_input)
+
+        if seam_fillet_active:
+            # The rim to fillet is this face's current outer boundary --
+            # spherical if rounded, still the true flat face otherwise.
+            outer_boundary_face = _rounded_cap_face(working_body) if rounding_active else _outer_planar_face(working_body)
+            if outer_boundary_face is not None:
+                side_count = len(face)
+                if effective_fillet_style == 'asymmetric':
+                    edges_for_type = seam_edges_by_type.setdefault(side_count, adsk.core.ObjectCollection.create())
+                    for edge in outer_boundary_face.edges:
+                        edges_for_type.add(edge)
+                    wall_extent_by_type[side_count] = wall_extent
+                else:
+                    for edge in outer_boundary_face.edges:
+                        seam_edges_flat.add(edge)
+
+        name = _polygon_name(len(face))
+        name_counts[name] = name_counts.get(name, 0) + 1
+        working_body.name = '{}{}'.format(name, name_counts[name])
+
+    if sphere_body is not None:
+        sphere_body.isLightBulbOn = False
+
+    seam_fillet_failed = False
+    if seam_fillet_active:
+        edge_length = _distance(vertices[faces[0][0]], vertices[faces[0][1]])
+        try:
+            fillet_input = component.features.filletFeatures.createInput()
+            fillet_input.isRollingBallCorner = False  # Setback corner type
+
+            if effective_fillet_style == 'asymmetric':
+                if not seam_edges_by_type:
+                    raise RuntimeError('no rounded panels to fillet')
+                offset_two = adsk.core.ValueInput.createByReal(_chord_sagitta(circumradius, edge_length) * seam_tightness)
+                for side_count, edges_for_type in seam_edges_by_type.items():
+                    offset_one = adsk.core.ValueInput.createByReal(wall_extent_by_type[side_count] * 0.9)
+                    edge_set = fillet_input.edgeSetInputs.addAsymmetricRadiusEdgeSet(
+                        edges_for_type, offset_one, offset_two, True)
+                    edge_set.continuity = adsk.fusion.SurfaceContinuityTypes.TangentSurfaceContinuityType
+            else:
+                if seam_edges_flat.count == 0:
+                    raise RuntimeError('no panels to fillet')
+                radius = adsk.core.ValueInput.createByReal(edge_length * seam_tightness)
+                edge_set = fillet_input.edgeSetInputs.addConstantRadiusEdgeSet(seam_edges_flat, radius, True)
+                edge_set.continuity = adsk.fusion.SurfaceContinuityTypes.TangentSurfaceContinuityType
+
+            component.features.filletFeatures.add(fillet_input)
+        except RuntimeError:
+            _log('Seam Fillet could not be applied: {}'.format(traceback.format_exc()))
+            seam_fillet_failed = True
+
+    return any_clamped, rounding_ineligible, seam_fillet_failed
+
+
+def _seam_fillet_preview(vertices, faces, edge_length, tol, cut_offset, split_body, rounded, seam_tightness):
+    # Every value here is computed with the exact same helpers/rules
+    # _create_cut_bodies uses for the real thing -- this function creates no
+    # Fusion objects and touches no adsk.* API at all, so it's safe to call
+    # purely to preview what a real generation would use.
+    face_heights = []
+    for face in faces:
+        normal, _ = _face_normal_and_area(vertices, face)
+        face_heights.append(abs(_vdot(normal, vertices[face[0]])))
+
+    shrink_fraction = None
+    cut_offset_clamped = False
+    if split_body and cut_offset is not None and cut_offset > 0:
+        shrink_fraction, cut_offset_clamped = _cut_shrink_fraction(faces, face_heights, cut_offset)
+
+    circumradius = _circumradius_if_uniform(vertices, tol) if rounded else None
+    rounding_active = bool(rounded) and circumradius is not None
+    rounding_ineligible = bool(rounded) and circumradius is None
+
+    constant_radius = edge_length * seam_tightness
+
+    asymmetric = None
+    if rounding_active:
+        offset_two = _chord_sagitta(circumradius, edge_length) * seam_tightness
+        by_type = {}
+        for face, height in zip(faces, face_heights):
+            wall_extent = (shrink_fraction * height) if shrink_fraction is not None else height
+            label = _polygon_name(len(face))
+            by_type[label] = wall_extent * 0.9
+        asymmetric = {'offset_two': offset_two, 'by_type': by_type}
+
+    return {
+        'cut_offset_clamped': cut_offset_clamped,
+        'rounding_ineligible': rounding_ineligible,
+        'constant_radius': constant_radius,
+        'asymmetric': asymmetric,
+    }
 
 
 def _new_component_sketch(sketch_name, edge_length):
@@ -412,23 +682,41 @@ def _new_component_sketch(sketch_name, edge_length):
     return component, sketch
 
 
-def _finish_wireframe(component, sketch, vertices, faces, edge_lines, tol, output_mode, cut_offset, split_body):
+def _finish_wireframe(component, sketch, vertices, faces, edge_lines, tol, output_mode, cut_offset, split_body, rounded,
+                       seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     if output_mode == 'surface':
         _create_surface_patches(component, faces, edge_lines)
     elif output_mode == 'bodies':
-        any_clamped = _create_cut_bodies(component, sketch, vertices, faces, edge_lines, tol, cut_offset, split_body)
+        any_clamped, rounding_ineligible, seam_fillet_failed = _create_cut_bodies(
+            component, sketch, vertices, faces, edge_lines, tol, cut_offset, split_body, rounded,
+            seam_fillet, fillet_style, seam_tightness)
         if any_clamped and ui:
             ui.messageBox('Cut offset was larger than one or more face heights; it was reduced automatically for those faces.')
+        if rounding_ineligible and ui:
+            ui.messageBox("Rounded exterior isn't available for this shape (its vertices aren't all the same "
+                          "distance from the center); Flat exterior was used instead.")
+        if seam_fillet_failed and ui:
+            ui.messageBox('Seam Fillet could not be applied to this shape; the rounded panels were created without it.')
 
     sketch.isVisible = False
     return sketch
 
 
-def _draw_wireframe(vertices, edge_length, tol, sketch_name, output_mode='sketch', cut_offset=None, split_body=True):
+def _draw_wireframe(vertices, edge_length, tol, sketch_name, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                     seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+    # Orienting is pure math (no adsk.* calls) and never depended on
+    # component/sketch, so it can run before _new_component_sketch -- this
+    # lets output_mode == 'preview' below return without ever touching the
+    # Fusion API or creating a single timeline entry.
+    vertices = _orient_largest_face_up(vertices, edge_length, tol)
+
+    if output_mode == 'preview':
+        adj = _build_adjacency(vertices, edge_length, tol)
+        faces = [f for f in _trace_faces(vertices, adj) if len(f) >= 3]
+        return _seam_fillet_preview(vertices, faces, edge_length, tol, cut_offset, split_body, rounded, seam_tightness)
+
     component, sketch = _new_component_sketch(sketch_name, edge_length)
     lines = sketch.sketchCurves.sketchLines
-
-    vertices = _orient_largest_face_up(vertices, edge_length, tol)
 
     edge_lines = {}
     for i in range(len(vertices)):
@@ -444,20 +732,29 @@ def _draw_wireframe(vertices, edge_length, tol, sketch_name, output_mode='sketch
 
     adj = _build_adjacency(vertices, edge_length, tol)
     faces = [f for f in _trace_faces(vertices, adj) if len(f) >= 3]
-    return _finish_wireframe(component, sketch, vertices, faces, edge_lines, tol, output_mode, cut_offset, split_body)
+    return _finish_wireframe(component, sketch, vertices, faces, edge_lines, tol, output_mode, cut_offset, split_body, rounded,
+                              seam_fillet, fillet_style, seam_tightness)
 
 
-def _draw_wireframe_from_faces(vertices, faces, edge_length, tol, sketch_name, output_mode='sketch', cut_offset=None, split_body=True):
+def _draw_wireframe_from_faces(vertices, faces, edge_length, tol, sketch_name, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                                seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     # For shapes with more than one edge length (e.g. kite-faced or elongated
     # solids), distance-based adjacency (_build_adjacency) can't tell edges
     # from diagonals, and _neighbors_by_angle's face tracing assumes every
     # vertex sits on one circumsphere -- neither holds here. Faces are handed
     # in explicitly instead, and edges are drawn directly from each face's
     # vertex loop.
+    #
+    # Orienting is pure math and never depended on component/sketch, so (as
+    # in _draw_wireframe) it can run before _new_component_sketch, letting
+    # output_mode == 'preview' return without touching the Fusion API.
+    vertices = _orient_by_faces(vertices, faces)
+
+    if output_mode == 'preview':
+        return _seam_fillet_preview(vertices, faces, edge_length, tol, cut_offset, split_body, rounded, seam_tightness)
+
     component, sketch = _new_component_sketch(sketch_name, edge_length)
     lines = sketch.sketchCurves.sketchLines
-
-    vertices = _orient_by_faces(vertices, faces)
 
     edge_lines = {}
     for face in faces:
@@ -474,7 +771,8 @@ def _draw_wireframe_from_faces(vertices, faces, edge_length, tol, sketch_name, o
     if output_mode == 'sketch':
         return sketch
 
-    return _finish_wireframe(component, sketch, vertices, faces, edge_lines, tol, output_mode, cut_offset, split_body)
+    return _finish_wireframe(component, sketch, vertices, faces, edge_lines, tol, output_mode, cut_offset, split_body, rounded,
+                              seam_fillet, fillet_style, seam_tightness)
 
 
 def _even_permutations(values):
@@ -500,7 +798,8 @@ def _all_permutations(values):
     return [tuple(values[i] for i in perm) for perm in itertools.permutations(range(3))]
 
 
-def make_truncated_icosahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_truncated_icosahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     phi = (1 + math.sqrt(5)) / 2
     scale = edge_length / 2.0
     base_sets = [
@@ -516,10 +815,12 @@ def make_truncated_icosahedron(edge_length, tol, output_mode='sketch', cut_offse
             for v in _even_permutations(signed):
                 vertices.add(tuple(round(scale * c, 8) for c in v))
 
-    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Icosahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Icosahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_icosahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_icosahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     phi = (1 + math.sqrt(5)) / 2
     raw = []
     for y in [1, -1]:
@@ -535,20 +836,24 @@ def make_icosahedron(edge_length, tol, output_mode='sketch', cut_offset=None, sp
     base_edge = 2.0
     scale = edge_length / base_edge
     vertices = [(scale*x, scale*y, scale*z) for x, y, z in raw]
-    return _draw_wireframe(vertices, edge_length, tol, 'Icosahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe(vertices, edge_length, tol, 'Icosahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_octahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_octahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     a = edge_length / math.sqrt(2)
     vertices = [
         ( a, 0, 0), (-a, 0, 0),
         (0,  a, 0), (0, -a, 0),
         (0, 0,  a), (0, 0, -a),
     ]
-    return _draw_wireframe(vertices, edge_length, tol, 'Octahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe(vertices, edge_length, tol, 'Octahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_tetrahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_tetrahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     s = edge_length / (2 * math.sqrt(2))
     vertices = [
         ( s,  s,  s),
@@ -556,16 +861,20 @@ def make_tetrahedron(edge_length, tol, output_mode='sketch', cut_offset=None, sp
         (-s,  s, -s),
         (-s, -s,  s),
     ]
-    return _draw_wireframe(vertices, edge_length, tol, 'Tetrahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe(vertices, edge_length, tol, 'Tetrahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_cube(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_cube(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     h = edge_length / 2.0
     vertices = [(x, y, z) for x in [h, -h] for y in [h, -h] for z in [h, -h]]
-    return _draw_wireframe(vertices, edge_length, tol, 'Cube', output_mode, cut_offset, split_body)
+    return _draw_wireframe(vertices, edge_length, tol, 'Cube', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_dodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_dodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     phi = (1 + math.sqrt(5)) / 2
     inv_phi = 1 / phi
     raw = []
@@ -586,12 +895,14 @@ def make_dodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, s
     base_edge = 2 / phi
     scale = edge_length / base_edge
     vertices = [(scale*x, scale*y, scale*z) for x, y, z in raw]
-    return _draw_wireframe(vertices, edge_length, tol, 'Dodecahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe(vertices, edge_length, tol, 'Dodecahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
 # ---------- Archimedean solids (all edge-transitive -- uniform-edge _draw_wireframe path) ----------
 
-def make_truncated_tetrahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_truncated_tetrahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     scale = edge_length / (2 * math.sqrt(2))
     base = (1, 1, 3)
     vertices = set()
@@ -601,10 +912,12 @@ def make_truncated_tetrahedron(edge_length, tol, output_mode='sketch', cut_offse
         signed = tuple(signs[i] * base[i] for i in range(3))
         for v in _even_permutations(signed):
             vertices.add(tuple(round(scale * c, 8) for c in v))
-    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Tetrahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Tetrahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_cuboctahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_cuboctahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     scale = edge_length / math.sqrt(2)
     base = (1, 1, 0)
     vertices = set()
@@ -612,10 +925,12 @@ def make_cuboctahedron(edge_length, tol, output_mode='sketch', cut_offset=None, 
         signed = tuple(signs[i] * base[i] for i in range(3))
         for v in _even_permutations(signed):
             vertices.add(tuple(round(scale * c, 8) for c in v))
-    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Cuboctahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Cuboctahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_truncated_cube(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_truncated_cube(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     k = math.sqrt(2) - 1
     scale = edge_length / (2 * k)
     base = (1, 1, k)
@@ -624,10 +939,12 @@ def make_truncated_cube(edge_length, tol, output_mode='sketch', cut_offset=None,
         signed = tuple(signs[i] * base[i] for i in range(3))
         for v in _even_permutations(signed):
             vertices.add(tuple(round(scale * c, 8) for c in v))
-    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Cube', output_mode, cut_offset, split_body)
+    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Cube', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_truncated_octahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_truncated_octahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     # Base triple (0,1,2) has 3 distinct magnitudes, so it needs the FULL
     # permutation group -- _even_permutations alone would silently produce a
     # different, wrong 12-vertex shape instead of this 24-vertex solid.
@@ -638,10 +955,12 @@ def make_truncated_octahedron(edge_length, tol, output_mode='sketch', cut_offset
         signed = tuple(signs[i] * base[i] for i in range(3))
         for v in _all_permutations(signed):
             vertices.add(tuple(round(scale * c, 8) for c in v))
-    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Octahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Octahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_rhombicuboctahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_rhombicuboctahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     # Archimedean solid, all permutations of (1,1,1+sqrt(2)). Base triple has
     # a repeated value (like cuboctahedron/truncated_cube) so _even_permutations
     # alone reaches every vertex -- verified standalone (V=24 all degree 4,
@@ -654,10 +973,12 @@ def make_rhombicuboctahedron(edge_length, tol, output_mode='sketch', cut_offset=
         signed = tuple(signs[i] * base[i] for i in range(3))
         for v in _even_permutations(signed):
             vertices.add(tuple(round(scale * c, 8) for c in v))
-    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Rhombicuboctahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Rhombicuboctahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_icosidodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_icosidodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     phi = (1 + math.sqrt(5)) / 2
     scale = edge_length  # base edge length is already 1.0 for these base sets
     base_sets = [(0, 0, phi), (0.5, phi / 2, phi * phi / 2)]
@@ -667,10 +988,12 @@ def make_icosidodecahedron(edge_length, tol, output_mode='sketch', cut_offset=No
             signed = tuple(signs[i] * base[i] for i in range(3))
             for v in _even_permutations(signed):
                 vertices.add(tuple(round(scale * c, 8) for c in v))
-    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Icosidodecahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Icosidodecahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_truncated_dodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_truncated_dodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     phi = (1 + math.sqrt(5)) / 2
     base_edge = 2 / phi
     scale = edge_length / base_edge
@@ -681,7 +1004,8 @@ def make_truncated_dodecahedron(edge_length, tol, output_mode='sketch', cut_offs
             signed = tuple(signs[i] * base[i] for i in range(3))
             for v in _even_permutations(signed):
                 vertices.add(tuple(round(scale * c, 8) for c in v))
-    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Dodecahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Dodecahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
 # ---------- non-uniform-edge shapes (explicit topology, see _draw_wireframe_from_faces) ----------
@@ -691,7 +1015,8 @@ D3_HEIGHT_TO_SIDE_RATIO = 1.5  # elongation for a fair-rolling d3; no first-prin
                                # if physical prints don't roll well.
 
 
-def make_triangular_prism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_triangular_prism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     s = edge_length
     h = s * D3_HEIGHT_TO_SIDE_RATIO
     r = s / math.sqrt(3)  # circumradius of an equilateral triangle with side s
@@ -706,7 +1031,8 @@ def make_triangular_prism(edge_length, tol, output_mode='sketch', cut_offset=Non
     sides = [[k, (k + 1) % 3, 3 + (k + 1) % 3, 3 + k] for k in range(3)]
     faces = [top_face, bottom_face] + sides
 
-    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Triangular Prism', output_mode, cut_offset, split_body)
+    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Triangular Prism', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
 def _prism_vertices_and_faces(n, side, height):
@@ -729,19 +1055,25 @@ def _prism_vertices_and_faces(n, side, height):
     return vertices, faces
 
 
-def make_pentagonal_prism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_pentagonal_prism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     vertices, faces = _prism_vertices_and_faces(5, edge_length, edge_length)
-    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Pentagonal Prism', output_mode, cut_offset, split_body)
+    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Pentagonal Prism', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_hexagonal_prism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_hexagonal_prism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     vertices, faces = _prism_vertices_and_faces(6, edge_length, edge_length)
-    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Hexagonal Prism', output_mode, cut_offset, split_body)
+    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Hexagonal Prism', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_octagonal_prism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_octagonal_prism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     vertices, faces = _prism_vertices_and_faces(8, edge_length, edge_length)
-    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Octagonal Prism', output_mode, cut_offset, split_body)
+    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Octagonal Prism', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
 def _uniform_antiprism_vertices_and_faces(n, edge_length):
@@ -772,19 +1104,25 @@ def _uniform_antiprism_vertices_and_faces(n, edge_length):
     return vertices, faces
 
 
-def make_square_antiprism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_square_antiprism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     vertices, faces = _uniform_antiprism_vertices_and_faces(4, edge_length)
-    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Square Antiprism', output_mode, cut_offset, split_body)
+    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Square Antiprism', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_pentagonal_antiprism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_pentagonal_antiprism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     vertices, faces = _uniform_antiprism_vertices_and_faces(5, edge_length)
-    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Pentagonal Antiprism', output_mode, cut_offset, split_body)
+    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Pentagonal Antiprism', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_hexagonal_antiprism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_hexagonal_antiprism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     vertices, faces = _uniform_antiprism_vertices_and_faces(6, edge_length)
-    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Hexagonal Antiprism', output_mode, cut_offset, split_body)
+    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Hexagonal Antiprism', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
 def _antiprism_dual_vertices_and_faces(n, edge_length):
@@ -824,14 +1162,17 @@ def _antiprism_dual_vertices_and_faces(n, edge_length):
     return vertices, faces
 
 
-def make_pentagonal_trapezohedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_pentagonal_trapezohedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     vertices, faces = _antiprism_dual_vertices_and_faces(5, edge_length)
-    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Pentagonal Trapezohedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Pentagonal Trapezohedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
 # ---------- Experimental ----------
 
-def make_rhombic_dodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_rhombic_dodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     # Edge-transitive Catalan solid: cube corners + stretched-octahedron
     # points at exactly 2x the cube's radius -- that 2:1 ratio is what makes
     # all 24 edges equal length and all 12 rhombic faces planar. Despite the
@@ -845,10 +1186,12 @@ def make_rhombic_dodecahedron(edge_length, tol, output_mode='sketch', cut_offset
     cube = [(x, y, z) for x in (u, -u) for y in (u, -u) for z in (u, -u)]
     stretched = [(2*u, 0, 0), (-2*u, 0, 0), (0, 2*u, 0), (0, -2*u, 0), (0, 0, 2*u), (0, 0, -2*u)]
     vertices = cube + stretched
-    return _draw_wireframe(vertices, edge_length, tol, 'Rhombic Dodecahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe(vertices, edge_length, tol, 'Rhombic Dodecahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_triakis_tetrahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_triakis_tetrahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     # Catalan dual of the truncated tetrahedron, derived by reciprocating a
     # real truncated tetrahedron and reading off the resulting numbers
     # (verified standalone, not assumed from memory): 4 "flat" (degree-6)
@@ -870,10 +1213,12 @@ def make_triakis_tetrahedron(edge_length, tol, output_mode='sketch', cut_offset=
         faces.append([others[1], others[2], apex])
         faces.append([others[2], others[0], apex])
 
-    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Triakis Tetrahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Triakis Tetrahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_tetrakis_hexahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_tetrakis_hexahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     # Catalan dual of the truncated octahedron ("kis cube": a pyramid on each
     # cube face). Derived by reciprocating a real truncated octahedron
     # (same base triple (0,1,2) as make_truncated_octahedron) -- apex sits at
@@ -898,10 +1243,12 @@ def make_tetrakis_hexahedron(edge_length, tol, output_mode='sketch', cut_offset=
         [6, 2, 12], [2, 0, 12], [0, 4, 12], [4, 6, 12],
         [7, 3, 13], [3, 1, 13], [1, 5, 13], [5, 7, 13],
     ]
-    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Tetrakis Hexahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Tetrakis Hexahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_rhombic_triacontahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_rhombic_triacontahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     # Catalan dual of the icosidodecahedron. Coordinates derived by literally
     # reciprocating a real (unit-edge) icosidodecahedron -- built from this
     # file's own make_icosidodecahedron base_sets/permutation logic, traced
@@ -946,10 +1293,12 @@ def make_rhombic_triacontahedron(edge_length, tol, output_mode='sketch', cut_off
     raw_edge = _distance(acute[0], obtuse[0])  # verified nearest-neighbor pair
     scale = edge_length / raw_edge
     vertices = [tuple(c * scale for c in v) for v in raw]
-    return _draw_wireframe(vertices, edge_length, tol, 'Rhombic Triacontahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe(vertices, edge_length, tol, 'Rhombic Triacontahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
-def make_stellated_octahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True):
+def make_stellated_octahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
     # Stella octangula: a compound of 2 tetrahedra, the second being the
     # first negated through the origin. Both share the origin as their
     # centroid, so each of the 8 total faces still lofts cleanly to the
@@ -968,7 +1317,8 @@ def make_stellated_octahedron(edge_length, tol, output_mode='sketch', cut_offset
         [1, 3, 2], [0, 2, 3], [0, 3, 1], [0, 1, 2],
         [6, 7, 5], [7, 6, 4], [5, 7, 4], [6, 5, 4],
     ]
-    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Stellated Octahedron', output_mode, cut_offset, split_body)
+    return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Stellated Octahedron', output_mode, cut_offset, split_body, rounded,
+                                          seam_fillet, fillet_style, seam_tightness)
 
 
 SHAPE_REGISTRY = {
@@ -1068,6 +1418,65 @@ def _load_shape_info():
 SHAPE_INFO = _load_shape_info()
 
 
+def _load_config():
+    # lucys_shape_forge_config.json is untracked/local (see .gitignore) and may
+    # not exist yet -- returns {} (not a crash) if missing or malformed, same
+    # defensive pattern as _load_shape_info, since remembering the last theme/
+    # shape is a convenience, not something shape creation depends on.
+    try:
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_config(updates):
+    # Read-modify-write so independent callers (theme selection vs. shape
+    # creation) each only need to supply the keys they own, without clobbering
+    # the other's already-saved values. Best-effort: a write failure (e.g. a
+    # read-only install folder) must never block shape creation.
+    config = _load_config()
+    config.update(updates)
+    try:
+        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2)
+    except OSError:
+        pass
+
+
+def _save_palette_geometry(palette):
+    # Fusion's Palette has no resize/move event -- width/height/left/top/
+    # dockingState are only ever readable on demand, so this is called at the
+    # two points the palette's lifecycle actually gives us: the user closing
+    # it (PaletteClosedHandler, which doesn't destroy the object, just hides
+    # it) and the add-in being stopped (right before palette.deleteMe()).
+    # Best-effort like _save_config -- must never block the palette from
+    # closing or the add-in from stopping cleanly.
+    try:
+        _save_config({'palette_geometry': {
+            'width': palette.width,
+            'height': palette.height,
+            'left': palette.left,
+            'top': palette.top,
+            'docking_state': int(palette.dockingState),
+        }})
+    except RuntimeError:
+        pass
+
+
+def _restore_palette_geometry(palette):
+    geometry = _load_config().get('palette_geometry', {})
+    try:
+        if 'left' in geometry:
+            palette.left = geometry['left']
+        if 'top' in geometry:
+            palette.top = geometry['top']
+        if 'docking_state' in geometry:
+            palette.dockingState = geometry['docking_state']
+    except RuntimeError:
+        pass
+
+
 def get_shape_payload():
     cats = []
     for cat_id, cat in SHAPE_REGISTRY.items():
@@ -1082,6 +1491,24 @@ def get_shape_payload():
             shapes.append(shape_entry)
         cats.append({'id': cat_id, 'label': cat['label'], 'shapes': shapes})
     return cats
+
+
+def _group_new_timeline_items(design, start_index, name):
+    # A single shape's Patch/Loft/Stitch/Split/Combine/Fillet features can
+    # otherwise clutter the (design-wide, not per-component) timeline with
+    # dozens of rows -- grouping lets a user collapse the whole shape to one
+    # row, or expand it back to full detail, without losing any parametric
+    # history. Best-effort: a failed/skipped group must never be treated as a
+    # failed shape creation.
+    timeline = design.timeline
+    end_index = timeline.count - 1
+    if end_index <= start_index:
+        return  # nothing (or only one item) was created -- no group needed
+    try:
+        group = timeline.timelineGroups.add(start_index, end_index)
+        group.name = name
+    except RuntimeError:
+        _log('Could not group new timeline items into "{}": {}'.format(name, traceback.format_exc()))
 
 
 def _send_to_palette(action, payload_dict):
@@ -1100,7 +1527,54 @@ class PaletteIncomingHandler(adsk.core.HTMLEventHandler):
             action = data.get('action', '')
 
             if action == 'ui_loaded':
-                _send_to_palette('load_shapes', {'categories': get_shape_payload()})
+                _send_to_palette('load_shapes', {'categories': get_shape_payload(), 'config': _load_config()})
+                return
+
+            if action == 'save_theme':
+                _save_config({'theme': data.get('theme', '')})
+                return
+
+            if action == 'preview_seam_fillet':
+                category = data.get('category', '')
+                shape = data.get('shape', '')
+                if not category or not shape:
+                    return
+
+                # Fires on every relevant field change while the user is
+                # still typing/adjusting -- transiently invalid input (e.g. a
+                # momentarily empty numeric field) must be skipped quietly,
+                # never surfaced as the top-level except's messageBox below.
+                try:
+                    edge = float(data.get('edge', 20.0)) * MM_TO_CM
+                    tol = float(data.get('tol', 0.1)) * MM_TO_CM
+                    cut_offset = data.get('cut_offset', None)
+                    cut_offset = float(cut_offset) * MM_TO_CM if cut_offset not in (None, '') else None
+                    split_body = bool(data.get('split_body', True))
+                    rounded = data.get('exterior_style', 'flat') == 'rounded'
+                    seam_tightness = float(data.get('seam_tightness', 1.0))
+
+                    builder = SHAPE_REGISTRY[category]['shapes'][shape]['builder']
+                    preview = builder(edge, tol, output_mode='preview', cut_offset=cut_offset, split_body=split_body,
+                                      rounded=rounded, seam_tightness=seam_tightness)
+                except (KeyError, ValueError):
+                    return
+
+                # Convert back to millimeters -- everything downstream of the
+                # MM_TO_CM boundary works in centimeters, but the palette's
+                # own fields (and this response) are always millimeters.
+                response = {
+                    'cut_offset_clamped': preview['cut_offset_clamped'],
+                    'rounding_ineligible': preview['rounding_ineligible'],
+                    'constant_radius': preview['constant_radius'] / MM_TO_CM,
+                    'asymmetric': None,
+                }
+                if preview['asymmetric'] is not None:
+                    response['asymmetric'] = {
+                        'offset_two': preview['asymmetric']['offset_two'] / MM_TO_CM,
+                        'by_type': {label: value / MM_TO_CM for label, value in preview['asymmetric']['by_type'].items()},
+                    }
+
+                _send_to_palette('seam_fillet_preview', response)
                 return
 
             if action == 'create_shape':
@@ -1115,16 +1589,38 @@ class PaletteIncomingHandler(adsk.core.HTMLEventHandler):
                 cut_offset = data.get('cut_offset', None)
                 cut_offset = float(cut_offset) * MM_TO_CM if cut_offset not in (None, '') else None
                 split_body = bool(data.get('split_body', True))
+                rounded = data.get('exterior_style', 'flat') == 'rounded'
+                seam_fillet = bool(data.get('seam_fillet', False))
+                fillet_style = data.get('fillet_style', 'constant')
+                if fillet_style not in ('constant', 'asymmetric'):
+                    fillet_style = 'constant'
+                seam_tightness = float(data.get('seam_tightness', 1.0))
+                group_timeline = bool(data.get('group_timeline', False))
 
                 if not category or not shape:
                     if ui:
                         ui.messageBox('Please select a category and shape.')
                     return
 
+                design = adsk.fusion.Design.cast(app.activeProduct)
+                timeline_start = design.timeline.count
+
                 builder = SHAPE_REGISTRY[category]['shapes'][shape]['builder']
                 start_time = time.time()
-                builder(edge, tol, output_mode=output_mode, cut_offset=cut_offset, split_body=split_body)
+                builder(edge, tol, output_mode=output_mode, cut_offset=cut_offset, split_body=split_body, rounded=rounded,
+                        seam_fillet=seam_fillet, fillet_style=fillet_style, seam_tightness=seam_tightness)
                 elapsed = time.time() - start_time
+
+                if group_timeline:
+                    shape_label = SHAPE_REGISTRY[category]['shapes'][shape]['label']
+                    _group_new_timeline_items(design, timeline_start, shape_label)
+
+                # Save the raw (pre-mm->cm-conversion) payload as-is, minus the
+                # dispatch key -- every field is already in the exact form the
+                # palette's own inputs use, so it can be applied straight back
+                # onto those controls on the next launch with no translation.
+                last_settings = {k: v for k, v in data.items() if k != 'action'}
+                _save_config({'last_settings': last_settings})
                 _send_to_palette('shape_created', {'shape': shape, 'elapsed': elapsed})
                 return
 
@@ -1135,7 +1631,9 @@ class PaletteIncomingHandler(adsk.core.HTMLEventHandler):
 
 class PaletteClosedHandler(adsk.core.UserInterfaceGeneralEventHandler):
     def notify(self, args):
-        pass
+        palette = ui.palettes.itemById(PALETTE_ID)
+        if palette:
+            _save_palette_geometry(palette)
 
 
 class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
@@ -1151,7 +1649,12 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             html_path = os.path.join(base_path, 'palette', 'index.html').replace('\\', '/')
             html_url = 'file:///' + html_path
 
-            palette = palettes.add(PALETTE_ID, CMD_NAME, html_url, True, True, True, 460, 660)
+            geometry = _load_config().get('palette_geometry', {})
+            width = geometry.get('width', 460)
+            height = geometry.get('height', 660)
+
+            palette = palettes.add(PALETTE_ID, CMD_NAME, html_url, True, True, True, width, height)
+            _restore_palette_geometry(palette)
 
             on_incoming = PaletteIncomingHandler()
             palette.incomingFromHTML.add(on_incoming)
@@ -1201,6 +1704,7 @@ def stop(context):
     try:
         palette = ui.palettes.itemById(PALETTE_ID)
         if palette:
+            _save_palette_geometry(palette)
             palette.deleteMe()
 
         workspace = ui.workspaces.itemById(WORKSPACE_ID)

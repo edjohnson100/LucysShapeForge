@@ -59,15 +59,38 @@
         </div>
 
         <div class="field-row">
-            <div class="field">
+            <div class="field" id="outputField">
                 <label for="outputMode">Output</label>
                 <select id="outputMode">
                     <option value="sketch" selected>Sketch Only</option>
                     <option value="surface">Surface Patches</option>
                     <option value="bodies">Bodies (Pyramids)</option>
                 </select>
+
+                <div id="seamFilletPreview" class="info-box" style="display:none;"></div>
+                <div id="cutOffsetPreview" class="info-box" style="display:none;"></div>
             </div>
             <div class="field" id="bodiesOptionsField" style="display:none;">
+                <label for="exteriorStyle">Exterior</label>
+                <select id="exteriorStyle">
+                    <option value="flat" selected>Flat</option>
+                    <option value="rounded">Rounded</option>
+                </select>
+
+                <label id="seamFilletRow" class="checkbox-row" style="display:none;">
+                    <input id="seamFillet" type="checkbox">
+                    Seam Fillet
+                </label>
+
+                <label for="filletStyle" id="filletStyleLabel" style="display:none;">Fillet Style</label>
+                <select id="filletStyle" style="display:none;">
+                    <option value="constant" selected>Constant</option>
+                    <option value="asymmetric">Asymmetric</option>
+                </select>
+
+                <label for="seamTightness" id="seamTightnessLabel" style="display:none;">Seam Tightness</label>
+                <input id="seamTightness" type="number" value="1.0" step="0.05" style="display:none;">
+
                 <label id="splitBodyRow" class="checkbox-row">
                     <input id="splitBody" type="checkbox" checked>
                     Split Body
@@ -75,6 +98,15 @@
 
                 <label for="cutOffset" id="cutOffsetLabel" style="display:none;">Cut Offset (mm)</label>
                 <input id="cutOffset" type="number" value="10" step="1" style="display:none;">
+            </div>
+        </div>
+
+        <div class="field-row" id="timelineGroupRow" style="display:none;">
+            <div class="field">
+                <label class="checkbox-row">
+                    <input id="groupTimeline" type="checkbox" checked>
+                    Group in Timeline
+                </label>
             </div>
         </div>
 

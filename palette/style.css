@@ -449,7 +449,8 @@ button:hover {
   color: var(--text-sub);
   font-size: 12px;
 }
-#shapeInfo {
+#shapeInfo,
+.info-box {
   margin-top: 10px;
   padding: 8px 10px;
   border: 1px solid var(--border-color);
@@ -458,4 +459,27 @@ button:hover {
   color: var(--text-sub);
   font-size: 12px;
   min-height: 18px;
+}
+.info-box {
+  line-height: 1.5;
+}
+.info-box .info-warning {
+  color: var(--status-error-text);
+}
+/* #outputField is a flex column so #seamFilletPreview can grow to fill
+   whatever leftover space exists next to the taller Exterior/Seam Fillet/
+   Fillet Style/Seam Tightness/Split Body/Cut Offset stack in the sibling
+   column, rather than guessing a fixed height that's wrong at other widths
+   or font sizes (a narrow palette wraps that stack's labels/selects taller,
+   changing how much space is actually available). */
+#outputField {
+  display: flex;
+  flex-direction: column;
+}
+#seamFilletPreview {
+  flex: 1 1 auto;
+  min-height: 60px;
+}
+#cutOffsetPreview {
+  min-height: 60px;
 }
