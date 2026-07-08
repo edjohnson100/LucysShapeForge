@@ -4,6 +4,8 @@
 
 **Author:** Ed Johnson (Making With An EdJ)
 
+**Version:** v1.1.0
+
 <img src="Lucys_Shape_Forge_AppIcon.png" alt="Lucy's Shapr Forge Logo Icon" width="400">
 
 Lucy's Shape Forge is a Fusion add-in that adds a toolbar button opening a small HTML palette. Once installed and running, you'll find it in the **Utilities** tab (a top-level tab alongside Solid, Surface, Mesh, etc.) — either as a toolbar icon right next to the **ADD-INS** panel's dropdown, or by selecting **Utilities → Add-Ins dropdown → Lucy's Shape Forge**. Pick a polyhedron, set an edge length, and generate it directly in your design — as a wireframe sketch, a set of surface patches, or a set of solid bodies ready for editing and 3D printing.
