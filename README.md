@@ -4,21 +4,20 @@
 
 **Author:** Ed Johnson (Making With An EdJ)
 
-**Version:** v1.1.0
+**Version:** v1.2.0
 
 <img src="Lucys_Shape_Forge_AppIcon.png" alt="Lucy's Shapr Forge Logo Icon" width="400">
 
-Lucy's Shape Forge is a Fusion add-in that adds a toolbar button opening a small HTML palette. Once installed and running, you'll find it in the **Utilities** tab (a top-level tab alongside Solid, Surface, Mesh, etc.) — either as a toolbar icon right next to the **ADD-INS** panel's dropdown, or by selecting **Utilities → Add-Ins dropdown → Lucy's Shape Forge**. Pick a polyhedron, set an edge length, and generate it directly in your design — as a wireframe sketch, a set of surface patches, or a set of solid bodies ready for editing and 3D printing.
+Lucy's Shape Forge is a Fusion add-in that adds a toolbar button opening a small HTML palette. Once installed and running, you'll find it in the **Utilities** tab (a top-level tab alongside Solid, Surface, Mesh, etc.) — either as a toolbar icon right next to the **ADD-INS** panel's dropdown, or by selecting **Utilities → Add-Ins dropdown → Lucy's Shape Forge**. Pick a polyhedron, set an edge length, and generate it directly in your design — as a wireframe sketch, a set of surface patches, a set of solid bodies, or a flat 3D-print-ready panel layout.
 
-## 🆕 What's New in v1.1.0
+## 🆕 What's New in v1.2.0
 
-- **Rounded exterior** for Bodies mode — domes each panel out to the shape's circumsphere via a boolean intersection, while every true vertex stays exactly fixed, for a smooth "faceted ball" look instead of flat panels.
-- **Seam Fillet** — rounds over the seam between panels. Two styles: a simple **Constant**-radius edge fillet (works on both Flat and Rounded exteriors), or an **Asymmetric** fillet tuned to a Rounded shape's own sphere geometry for a closer blend. A **Seam Tightness** field scales either style.
-- **Live value preview** — the palette now shows the actual fillet radius/offsets that current settings will produce, and proactively warns if Rounded isn't available for the selected shape or if Cut Offset is too large, before you click Create.
-- **Group in Timeline** — an optional checkbox that collapses a shape's (often dozens of) Patch/Loft/Stitch/Split/Combine/Fillet timeline entries into a single expandable/collapsible group.
-- **Bodies/Surface bodies are now named by polygon type** (`Hexagon1`, `Pentagon1`, ...) instead of Fusion's generic `Body1`, `Body2`.
-- **The palette remembers your last session** — theme, every shape-creation setting, and the palette window's size/position/dock state all persist across Fusion restarts (stored in a local, untracked `lucys_shape_forge_config.json`).
-- Cut Offset now defaults to 25% of Edge Length (previously 50%).
+- **Flat Panels output mode** — lays every face out as a flat, edge-to-edge 2D net in one sketch (like an unfolded soccer ball), then extrudes each panel with a taper angle so the printed result matches that face's true frustum shape from Bodies mode. Only available for shapes where every vertex is the same distance from center; a separate, non-blocking warning flags shapes with non-uniform face edge lengths (e.g. the D3 triangular prism), where some panels may still come out misshapen.
+- **Shell Body** — hollow out split panels (Bodies or Flat Panels) into a thin-walled cavity of a chosen **Wall Thickness**, instead of a solid wedge.
+- **Shell Faces** — choose which face(s) Shell Body opens: **Inside** (the default — opens toward the shape's center), **Outside** (opens the true outer face instead), or **Both** (opens a through-cavity with just the tapered walls remaining).
+- **Shell Style** — choose **Sharp** (default) or **Rounded** corners on the shelled cavity, matching the two styles in Fusion's own Shell command.
+- **Edge Length now defaults to 44mm** — the standard seam/edge length of a real soccer ball, a nod to this project's origin as a World Cup soccer-ball build.
+- Cut Offset, Split Body, and Shell Body/Wall Thickness now also apply to Flat Panels mode, alongside Bodies mode.
 
 ## Features
 
@@ -31,10 +30,12 @@ Lucy's Shape Forge is a Fusion add-in that adds a toolbar button opening a small
   - **Experimental** — Stellated Octahedron, plus curated repeats of the Rhombic Dodecahedron and Triakis Tetrahedron.
 - **Shape info panel**: selecting a shape shows its face/vertex counts and a short description right in the palette.
 - **Auto-orientation**: every shape is rotated so its largest face sits flat, parallel to the ground plane, while staying centered on the origin.
-- **Three output types**, chosen per shape:
+- **Four output types**, chosen per shape:
   - **Sketch Only** — a 3D wireframe sketch (vertices + edges).
   - **Surface Patches** — a flat surface patch for every face, with face normals auto-corrected to point outward.
   - **Bodies (Pyramids)** — a solid body per face, optionally trimmed down to a thin face-hugging shell (rather than a solid wedge to the center) via a **Cut Offset** — the math keeps every seam between faces aligned, even between different polygon types (e.g. the pentagons and hexagons of the truncated icosahedron). Choose a **Flat** or **Rounded** exterior (Rounded domes each panel out to the shape's circumsphere), and optionally add a **Seam Fillet** (Constant or Asymmetric) to smooth the seam between panels — the palette previews the actual computed values live before you create anything. Bodies (and Surface Patches) are named by polygon type (`Hexagon1`, `Pentagon1`, ...), and an optional **Group in Timeline** checkbox collapses each shape's timeline entries into one expandable group.
+  - **Flat Panels** — lays every face out as a flat, edge-to-edge 2D net in a single sketch, then extrudes each panel with a taper angle so it's physically equivalent to that face's Bodies-mode frustum, but oriented flat for printing on a bed. Only available for shapes where every vertex is the same distance from center (same eligibility as Rounded exterior). Uses the same **Split Body**/**Cut Offset** controls as Bodies mode to control panel depth.
+  - Both **Bodies** and **Flat Panels** support optional **Shell Body**, which hollows split panels into a thin-walled cavity of a chosen **Wall Thickness**. **Shell Faces** picks which face(s) get opened — Inside (default), Outside, or Both — and **Shell Style** picks Sharp or Rounded cavity corners.
 - **Each shape is created in its own new component**, named `{Shape}_{EdgeLength}` (e.g. `Cube_2`), so generating several shapes side by side never collides.
 - **Themeable palette**: a Theme dropdown with 9 built-in looks, plus the ability to import a custom `.theme.json` exported from the author's companion tool, [Theme Designer Pro](https://github.com/edjohnson100/ThemeDesigner).
 
@@ -69,11 +70,13 @@ Lucy's Shape Forge requires a quick manual installation. You can choose to insta
 ## Usage
 
 1. Pick a **Category** and **Shape** — the panel below the dropdowns shows that shape's face/vertex counts and a short description.
-2. Set **Edge Length** and **Tolerance** (the distance tolerance used to detect which vertex pairs form an edge).
+2. Set **Edge Length** and **Tolerance**. Edge Length defaults to **44mm** — a nod to this project's origin as a soccer-ball build for the World Cup (44mm is a standard soccer ball's seam/edge length) — but works at any scale. Tolerance is the distance threshold used to decide which vertex pairs count as an edge (and, for eligible shapes, whether every vertex is close enough to a common center to support Rounded exterior or Flat Panels mode); as a rule of thumb, keep it around **0.1%–1% of Edge Length** rather than treating it as a fixed value — too large risks false edges or wrongly-detected eligibility on some shapes, too small risks missing real edges to ordinary floating-point rounding in the underlying geometry math. The default 0.1mm sits at roughly 0.2% of the 44mm default Edge Length.
 3. Choose an **Output** type:
    - *Sketch Only* — nothing further to configure.
    - *Surface Patches* — nothing further to configure.
    - *Bodies (Pyramids)* — leave **Split Body** checked to cut each face down to a thin shell panel (adjust **Cut Offset** for shell thickness), or uncheck it to keep the full solid pyramids. Choose **Exterior**: *Flat* (the true polyhedron faces) or *Rounded* (domes each panel out to the shape's circumsphere — only available for shapes where every vertex is the same distance from center). Check **Seam Fillet** to smooth the seam between panels, pick a **Fillet Style** (*Constant* or, on Rounded shapes, *Asymmetric*), and adjust **Seam Tightness** to taste — the palette shows the actual radius/offset values that will be used, live, so you can dial it in before creating anything. Check **Group in Timeline** to collapse the shape's many timeline entries into one expandable group.
+   - *Flat Panels* — same **Split Body**/**Cut Offset** controls as Bodies mode, but instead of building each panel at its true 3D position, every face is laid out flat and edge-to-edge in one sketch and extruded with a taper, ready to lay out on a print bed. Only available for shapes where every vertex is the same distance from center (same shapes Rounded exterior supports) — other shapes show a warning instead. If a shape's faces don't all share one edge length (e.g. the D3 die's rectangular sides), you'll get a non-blocking warning that some panels may come out misshapen; inspect the result before printing.
+   - On *Bodies* or *Flat Panels* with **Split Body** checked, also check **Shell Body** to hollow each panel into a thin-walled cavity — set **Wall Thickness**, pick which face(s) **Shell Faces** opens (*Inside* toward the shape's center, *Outside* the true visible face, or *Both* for a through-cavity), and pick **Shell Style** (*Sharp* or *Rounded* cavity corners, matching Fusion's own Shell command).
 4. Click **Create Shape**. The status line below the button confirms once the shape is done, along with how long it took.
 
 To customize the palette's look, use the **Theme** dropdown, or export a theme from [Theme Designer Pro's live site](https://edjohnson100.github.io/ThemeDesigner/) and load it with **Import Theme (.json)**. The palette remembers your theme, last shape settings, and window size/position across Fusion sessions.

@@ -50,7 +50,7 @@
         <div class="field-row">
             <div class="field">
                 <label for="edge">Edge Length (mm)</label>
-                <input id="edge" type="number" value="20" step="1">
+                <input id="edge" type="number" value="44" step="1">
             </div>
             <div class="field">
                 <label for="tol">Tolerance (mm)</label>
@@ -65,13 +65,15 @@
                     <option value="sketch" selected>Sketch Only</option>
                     <option value="surface">Surface Patches</option>
                     <option value="bodies">Bodies (Pyramids)</option>
+                    <option value="net">Flat Panels (Tapered)</option>
                 </select>
 
                 <div id="seamFilletPreview" class="info-box" style="display:none;"></div>
                 <div id="cutOffsetPreview" class="info-box" style="display:none;"></div>
+                <div id="shellThicknessPreview" class="info-box" style="display:none;"></div>
             </div>
             <div class="field" id="bodiesOptionsField" style="display:none;">
-                <label for="exteriorStyle">Exterior</label>
+                <label for="exteriorStyle" id="exteriorStyleLabel">Exterior</label>
                 <select id="exteriorStyle">
                     <option value="flat" selected>Flat</option>
                     <option value="rounded">Rounded</option>
@@ -98,6 +100,27 @@
 
                 <label for="cutOffset" id="cutOffsetLabel" style="display:none;">Cut Offset (mm)</label>
                 <input id="cutOffset" type="number" value="10" step="1" style="display:none;">
+
+                <label id="shellBodyRow" class="checkbox-row" style="display:none;">
+                    <input id="shellBody" type="checkbox">
+                    Shell Body
+                </label>
+
+                <label for="wallThickness" id="wallThicknessLabel" style="display:none;">Wall Thickness (mm)</label>
+                <input id="wallThickness" type="number" value="2" step="0.5" style="display:none;">
+
+                <label for="shellFaces" id="shellFacesLabel" style="display:none;">Shell Faces</label>
+                <select id="shellFaces" style="display:none;">
+                    <option value="inside" selected>Inside</option>
+                    <option value="outside">Outside</option>
+                    <option value="both">Both</option>
+                </select>
+
+                <label for="shellStyle" id="shellStyleLabel" style="display:none;">Shell Style</label>
+                <select id="shellStyle" style="display:none;">
+                    <option value="sharp" selected>Sharp</option>
+                    <option value="rounded">Rounded</option>
+                </select>
             </div>
         </div>
 

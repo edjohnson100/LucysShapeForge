@@ -158,11 +158,32 @@ function handleThemeFileImport() {
 function toggleBodiesOptionsVisibility() {
     const outputMode = $("outputMode").value;
     const isBodies = outputMode === "bodies";
-    $("bodiesOptionsField").style.display = isBodies ? "" : "none";
+    const isNet = outputMode === "net";
+    const showOptionsField = isBodies || isNet;
+    $("bodiesOptionsField").style.display = showOptionsField ? "" : "none";
 
-    const showCutOffset = isBodies && $("splitBody").checked;
+    // Exterior/Seam Fillet/Fillet Style/Seam Tightness are Bodies-only --
+    // Net mode's panels are always flat, tapered extrudes, not domed or
+    // filleted pyramids.
+    $("exteriorStyleLabel").style.display = isBodies ? "" : "none";
+    $("exteriorStyle").style.display = isBodies ? "" : "none";
+
+    // Split Body / Cut Offset / Shell Body / Wall Thickness still apply to
+    // Net mode -- a panel's extrude depth (wall_extent) is governed by the
+    // same split-cut-offset math as a Bodies-mode frustum's wall.
+    const showCutOffset = showOptionsField && $("splitBody").checked;
     $("cutOffsetLabel").style.display = showCutOffset ? "" : "none";
     $("cutOffset").style.display = showCutOffset ? "" : "none";
+
+    const showShellBody = showOptionsField && $("splitBody").checked;
+    $("shellBodyRow").style.display = showShellBody ? "" : "none";
+    const showWallThickness = showShellBody && $("shellBody").checked;
+    $("wallThicknessLabel").style.display = showWallThickness ? "" : "none";
+    $("wallThickness").style.display = showWallThickness ? "" : "none";
+    $("shellFacesLabel").style.display = showWallThickness ? "" : "none";
+    $("shellFaces").style.display = showWallThickness ? "" : "none";
+    $("shellStyleLabel").style.display = showWallThickness ? "" : "none";
+    $("shellStyle").style.display = showWallThickness ? "" : "none";
 
     // Seam Fillet itself only needs Bodies mode -- Constant style works on
     // both Flat and Rounded exteriors, so the checkbox no longer waits on
@@ -197,31 +218,42 @@ function formatMm(value) {
 function renderSeamFilletPreview() {
     const seamBox = $("seamFilletPreview");
     const cutBox = $("cutOffsetPreview");
+    const shellBox = $("shellThicknessPreview");
 
-    if (!lastSeamPreview || $("outputMode").value !== "bodies") {
+    const outputMode = $("outputMode").value;
+    const isBodies = outputMode === "bodies";
+    const isNet = outputMode === "net";
+
+    if (!lastSeamPreview || !(isBodies || isNet)) {
         seamBox.style.display = "none";
         cutBox.style.display = "none";
+        shellBox.style.display = "none";
         return;
     }
 
     const data = lastSeamPreview;
     const seamLines = [];
 
-    if (data.rounding_ineligible) {
-        seamLines.push('<span class="info-warning">Rounded exterior isn\'t available for this shape ' +
-            "(its vertices aren't all the same distance from the center).</span>");
-    }
-
-    if ($("seamFillet").checked) {
-        seamLines.push(`Constant: ${formatMm(data.constant_radius)}mm radius`);
-        seamLines.push(``);
-        if (data.asymmetric) {
-            seamLines.push("Asymmetric Offset Lengths:");
-            const byType = data.asymmetric.by_type;
-            Object.keys(byType).forEach(label => {
-                seamLines.push(`${label} ${formatMm(byType[label])}/${formatMm(data.asymmetric.offset_two)}mm`);
-            });
+    if (isBodies) {
+        if (data.rounding_ineligible) {
+            seamLines.push('<span class="info-warning">Rounded exterior isn\'t available for this shape ' +
+                "(its vertices aren't all the same distance from the center).</span>");
         }
+
+        if ($("seamFillet").checked) {
+            seamLines.push(`Constant: ${formatMm(data.constant_radius)}mm radius`);
+            seamLines.push(``);
+            if (data.asymmetric) {
+                seamLines.push("Asymmetric Offset Lengths:");
+                const byType = data.asymmetric.by_type;
+                Object.keys(byType).forEach(label => {
+                    seamLines.push(`${label} ${formatMm(byType[label])}/${formatMm(data.asymmetric.offset_two)}mm`);
+                });
+            }
+        }
+    } else if (isNet && data.net_ineligible) {
+        seamLines.push('<span class="info-warning">Flat Panels isn\'t available for this shape ' +
+            "(its vertices aren't all the same distance from the center).</span>");
     }
 
     if (seamLines.length > 0) {
@@ -237,10 +269,18 @@ function renderSeamFilletPreview() {
     } else {
         cutBox.style.display = "none";
     }
+
+    if (data.shell_warning && $("shellBody").checked) {
+        shellBox.textContent = "Wall thickness is larger than one or more available cavities; shelling may fail for those panels.";
+        shellBox.style.display = "";
+    } else {
+        shellBox.style.display = "none";
+    }
 }
 
 function requestSeamFilletPreview() {
-    if ($("outputMode").value !== "bodies" || !$("category").value || !$("shape").value) {
+    const outputMode = $("outputMode").value;
+    if (!(outputMode === "bodies" || outputMode === "net") || !$("category").value || !$("shape").value) {
         return;
     }
 
@@ -257,7 +297,11 @@ function requestSeamFilletPreview() {
             cut_offset: $("cutOffset").value,
             split_body: $("splitBody").checked,
             exterior_style: $("exteriorStyle").value,
-            seam_tightness: $("seamTightness").value
+            seam_tightness: $("seamTightness").value,
+            shell_body: $("shellBody").checked,
+            wall_thickness: $("wallThickness").value,
+            shell_faces: $("shellFaces").value,
+            shell_style: $("shellStyle").value
         });
     }, 300);
 }
@@ -277,6 +321,12 @@ function applySavedSettings(settings) {
     if (settings.seam_fillet != null) $("seamFillet").checked = !!settings.seam_fillet;
     if (settings.fillet_style != null) $("filletStyle").value = settings.fillet_style;
     if (settings.seam_tightness != null) $("seamTightness").value = settings.seam_tightness;
+    if (settings.shell_body != null) $("shellBody").checked = !!settings.shell_body;
+    if (settings.wall_thickness != null && settings.wall_thickness !== "") {
+        $("wallThickness").value = settings.wall_thickness;
+    }
+    if (settings.shell_faces != null) $("shellFaces").value = settings.shell_faces;
+    if (settings.shell_style != null) $("shellStyle").value = settings.shell_style;
     if (settings.group_timeline != null) $("groupTimeline").checked = !!settings.group_timeline;
 
     toggleBodiesOptionsVisibility();
@@ -297,6 +347,10 @@ function sendCreateShape() {
         seam_fillet: $("seamFillet").checked,
         fillet_style: $("filletStyle").value,
         seam_tightness: $("seamTightness").value,
+        shell_body: $("shellBody").checked,
+        wall_thickness: $("wallThickness").value,
+        shell_faces: $("shellFaces").value,
+        shell_style: $("shellStyle").value,
         group_timeline: $("groupTimeline").checked
     };
 
@@ -348,11 +402,15 @@ document.addEventListener("DOMContentLoaded", function () {
     $("exteriorStyle").addEventListener("change", toggleBodiesOptionsVisibility);
     $("exteriorStyle").addEventListener("change", requestSeamFilletPreview);
     $("seamFillet").addEventListener("change", toggleBodiesOptionsVisibility);
+    $("shellBody").addEventListener("change", toggleBodiesOptionsVisibility);
+    $("shellBody").addEventListener("change", requestSeamFilletPreview);
 
     $("cutOffset").addEventListener("input", function () {
         cutOffsetTouched = true;
         requestSeamFilletPreview();
     });
+
+    $("wallThickness").addEventListener("input", requestSeamFilletPreview);
 
     $("edge").addEventListener("input", function () {
         if (!cutOffsetTouched) {

@@ -115,6 +115,208 @@ def _face_normal_and_area(vertices, face):
     return normal, area
 
 
+# ---------- 2D net unfold (Net output mode) ----------
+# Pure math, zero adsk.* calls -- verified standalone (see scratchpad
+# verify_taper_angle.py / verify_face_adjacency_graph.py /
+# verify_unfold_net_cube.py / verify_unfold_net_all_eligible_shapes.py /
+# verify_winding_reconciliation.py) before being wired into Fusion calls.
+
+def _faces_have_uniform_edge_length(vertices, faces, edge_length, tol):
+    # _regular_polygon_2d/_apothem/_taper_angle/_place_child_polygon all
+    # assume every face is a regular polygon whose sides all equal the
+    # shape-wide edge_length scalar. That's false for any face with a
+    # non-edge_length side (e.g. a triangular prism's rectangular side
+    # faces) -- confirmed via live testing to corrupt the net layout for
+    # that face. Checks every edge of every face against edge_length,
+    # reusing the same distance technique _build_adjacency already uses.
+    for face in faces:
+        n = len(face)
+        for k in range(n):
+            side = _distance(vertices[face[k]], vertices[face[(k + 1) % n]])
+            if abs(side - edge_length) > tol:
+                return False
+    return True
+
+
+def _face_adjacency_graph(faces):
+    # Two faces are adjacent if they share an edge: a pair of vertex indices
+    # that appear consecutively (in either direction) in both faces' loops.
+    # Returns {face_idx: [(neighbor_face_idx, (a, b), local_edge_start_pos), ...]}
+    # where local_edge_start_pos k means this face's edge runs from
+    # face[k] -> face[(k+1) % n].
+    edge_owner = {}
+    for face_idx, face in enumerate(faces):
+        n = len(face)
+        for k in range(n):
+            i, j = face[k], face[(k + 1) % n]
+            edge_owner.setdefault(frozenset((i, j)), []).append((face_idx, k))
+
+    graph = {idx: [] for idx in range(len(faces))}
+    for edge, owners in edge_owner.items():
+        if len(owners) == 2:
+            (fa, ka), (fb, kb) = owners
+            graph[fa].append((fb, edge, ka))
+            graph[fb].append((fa, edge, kb))
+        elif len(owners) == 1:
+            continue  # boundary edge -- shouldn't happen for a closed polyhedron
+        else:
+            raise ValueError('Edge shared by more than 2 faces: not a manifold polyhedron.')
+    return graph
+
+
+def _regular_polygon_2d(n, edge_length, center=(0.0, 0.0), start_angle=0.0):
+    R = edge_length / (2 * math.sin(math.pi / n))
+    return [
+        (center[0] + R * math.cos(start_angle + 2 * math.pi * k / n),
+         center[1] + R * math.sin(start_angle + 2 * math.pi * k / n))
+        for k in range(n)
+    ]
+
+
+def _polygon_centroid_2d(poly):
+    n = len(poly)
+    return (sum(p[0] for p in poly) / n, sum(p[1] for p in poly) / n)
+
+
+def _vsub2(a, b): return (a[0] - b[0], a[1] - b[1])
+def _vadd2(a, b): return (a[0] + b[0], a[1] + b[1])
+def _vdot2(a, b): return a[0] * b[0] + a[1] * b[1]
+
+
+def _rotate_2d(v, angle):
+    c, s = math.cos(angle), math.sin(angle)
+    return (v[0] * c - v[1] * s, v[0] * s + v[1] * c)
+
+
+def _place_child_polygon(n_child, edge_length, p_start, p_end, away_from):
+    # Build a regular n_child-gon whose vertex 0 sits at p_start and vertex 1
+    # at p_end, extending on whichever side (left-turn or right-turn
+    # construction) puts the polygon's centroid further from `away_from`
+    # than the shared edge's midpoint is -- i.e. away from the parent panel
+    # it's hinging off of. This sidesteps needing to normalize 3D face
+    # winding globally (_trace_faces doesn't guarantee it): whichever turn
+    # direction lands on the correct side is used, full stop.
+    def build(turn_sign):
+        pts = [p_start, p_end]
+        edge_vec = _vsub2(p_end, p_start)
+        exterior_angle = turn_sign * (2 * math.pi / n_child)
+        for _ in range(n_child - 2):
+            edge_vec = _rotate_2d(edge_vec, exterior_angle)
+            pts.append(_vadd2(pts[-1], edge_vec))
+        return pts
+
+    midpoint = ((p_start[0] + p_end[0]) / 2.0, (p_start[1] + p_end[1]) / 2.0)
+    outward_ref = _vsub2(midpoint, away_from)
+
+    candidate_left = build(1)
+    score_left = _vdot2(_vsub2(_polygon_centroid_2d(candidate_left), midpoint), outward_ref)
+    if score_left > 0:
+        return candidate_left
+    return build(-1)
+
+
+def _unfold_net(faces, edge_length):
+    # Returns a list of 2D polygons, one per face, index-aligned with
+    # `faces`, each polygon's own points index-aligned with that face's
+    # vertex loop order. Laid out edge-to-edge via a BFS spanning-tree walk
+    # of the face-adjacency graph, starting from the face with the most
+    # sides (same tie-break convention _cut_shrink_fraction already uses).
+    graph = _face_adjacency_graph(faces)
+
+    root = max(range(len(faces)), key=lambda i: (len(faces[i]), -i))
+
+    placed = [None] * len(faces)
+    placed[root] = _regular_polygon_2d(len(faces[root]), edge_length)
+
+    visited = {root}
+    queue = [root]
+    while queue:
+        current = queue.pop(0)
+        for neighbor, edge, ka in sorted(graph[current], key=lambda t: t[0]):
+            if neighbor in visited:
+                continue
+            visited.add(neighbor)
+
+            face_parent = faces[current]
+            n_parent = len(face_parent)
+            A = face_parent[ka]
+            B = face_parent[(ka + 1) % n_parent]
+            p_A = placed[current][ka]
+            p_B = placed[current][(ka + 1) % n_parent]
+
+            face_child = faces[neighbor]
+            n_child = len(face_child)
+            kb = None
+            for k in range(n_child):
+                c1, c2 = face_child[k], face_child[(k + 1) % n_child]
+                if {c1, c2} == {A, B}:
+                    kb = k
+                    c_start = c1
+                    break
+            if kb is None:
+                raise ValueError('adjacency graph inconsistent with face loops')
+
+            p_start, p_end = (p_A, p_B) if c_start == A else (p_B, p_A)
+
+            parent_centroid = _polygon_centroid_2d(placed[current])
+            child_pts = _place_child_polygon(n_child, edge_length, p_start, p_end, parent_centroid)
+
+            child_polygon = [None] * n_child
+            for offset, pt in enumerate(child_pts):
+                child_polygon[(kb + offset) % n_child] = pt
+            placed[neighbor] = child_polygon
+
+            queue.append(neighbor)
+
+    if any(p is None for p in placed):
+        raise ValueError('face adjacency graph is not fully connected')
+
+    return placed
+
+
+def _sat_overlap(poly_a, poly_b, tol=1e-7):
+    # Separating Axis Test for two convex 2D polygons (every face here is a
+    # regular convex polygon); True if they overlap -- touching at a shared
+    # edge/vertex within tol does NOT count as overlap, since that's the
+    # expected/desired net-adjacency case.
+    def axes(poly):
+        n = len(poly)
+        result = []
+        for i in range(n):
+            x1, y1 = poly[i]
+            x2, y2 = poly[(i + 1) % n]
+            edge = (x2 - x1, y2 - y1)
+            normal = (-edge[1], edge[0])
+            length = math.hypot(*normal)
+            if length > 1e-12:
+                result.append((normal[0] / length, normal[1] / length))
+        return result
+
+    for axis in axes(poly_a) + axes(poly_b):
+        proj_a = [p[0] * axis[0] + p[1] * axis[1] for p in poly_a]
+        proj_b = [p[0] * axis[0] + p[1] * axis[1] for p in poly_b]
+        if max(proj_a) <= min(proj_b) + tol or max(proj_b) <= min(proj_a) + tol:
+            return False  # separating axis found
+    return True
+
+
+def _net_has_overlap(placed):
+    n = len(placed)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _sat_overlap(placed[i], placed[j]):
+                return True
+    return False
+
+
+def _apothem(edge_length, side_count):
+    return edge_length / (2 * math.tan(math.pi / side_count))
+
+
+def _taper_angle(apothem, height):
+    return math.atan(apothem / height)
+
+
 _POLYGON_NAMES = {
     3: 'Triangle', 4: 'Square', 5: 'Pentagon', 6: 'Hexagon', 7: 'Heptagon',
     8: 'Octagon', 9: 'Nonagon', 10: 'Decagon',
@@ -332,6 +534,56 @@ def _outer_planar_face(body):
     return best_face
 
 
+def _face_matching_plane(body, plane_geom, tol):
+    # Identifies a specific remembered plane (e.g. the offset cut plane used
+    # by a prior Split Body) on a body that's since been mutated by Rounding/
+    # Seam Fillet -- safer than "closest to origin" since after those steps
+    # run, a lateral or capped face could coincidentally be just as close.
+    # Fusion can hand back a face's normal pointing either way for the same
+    # physical plane, so compare abs(dot) to 1 rather than requiring an exact
+    # vector match.
+    target_normal = (plane_geom.normal.x, plane_geom.normal.y, plane_geom.normal.z)
+    target_dist = _plane_distance_to_world_origin(plane_geom)
+    for face in body.faces:
+        plane = face.geometry
+        if not isinstance(plane, adsk.core.Plane):
+            continue
+        n = (plane.normal.x, plane.normal.y, plane.normal.z)
+        same_direction = abs(abs(_vdot(n, target_normal)) - 1.0) < 1e-4
+        if same_direction and abs(_plane_distance_to_world_origin(plane) - target_dist) < tol:
+            return face
+    return None
+
+
+def _shell_faces(component, faces, thickness, shell_style='sharp'):
+    # Shared by both Bodies mode (inner cut-plane face located via
+    # _face_matching_plane, outer face via _outer_planar_face/
+    # _rounded_cap_face) and Net mode (inner/outer extrude end caps located
+    # via ExtrudeFeature.endFaces/startFaces) -- the call sites only differ
+    # in how they find the face(s) to remove, not in how the shell itself is
+    # created. Takes 1 face (shell_faces == 'inside' or 'outside') or 2
+    # (shell_faces == 'both') -- Fusion's shellFeatures handles multiple
+    # open faces in one call.
+    try:
+        faces_to_remove = adsk.core.ObjectCollection.create()
+        for face in faces:
+            faces_to_remove.add(face)
+        shell_input = component.features.shellFeatures.createInput(faces_to_remove, False)
+        shell_input.insideThickness = adsk.core.ValueInput.createByReal(thickness)
+        # shellType corresponds to the two icon-radio-buttons in Fusion's own
+        # Shell dialog (Sharp/Rounded) -- confirmed present via live API
+        # introspection even though it's missing from at least one cached
+        # docs source. SharpOffsetShellType matches this function's prior,
+        # unset-default behavior exactly.
+        shell_input.shellType = (adsk.fusion.ShellTypes.RoundedOffsetShellType if shell_style == 'rounded'
+                                  else adsk.fusion.ShellTypes.SharpOffsetShellType)
+        component.features.shellFeatures.add(shell_input)
+        return True
+    except RuntimeError:
+        _log('Shell Body could not be applied to a panel: {}'.format(traceback.format_exc()))
+        return False
+
+
 def _remove_if_valid(component, body):
     # Use the dedicated Remove feature rather than BRepBody.deleteMe(): a raw
     # deleteMe() doesn't create a clean timeline entry, breaks other
@@ -426,7 +678,8 @@ def _chord_sagitta(R, edge_length):
 
 
 def _create_cut_bodies(component, sketch, vertices, faces, edge_lines, tol, cut_offset, split_body, rounded,
-                        seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                        seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                        shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     # A face-to-point Loft with isSolid=True turned out to silently produce a
     # surface, not a solid (confirmed via live testing), so build the solid
     # pyramid the long way instead: patch the face for a flat base surface,
@@ -477,6 +730,14 @@ def _create_cut_bodies(component, sketch, vertices, faces, edge_lines, tol, cut_
     seam_edges_flat = adsk.core.ObjectCollection.create() if seam_fillet_active else None
     seam_edges_by_type = {} if seam_fillet_active else None
     wall_extent_by_type = {} if seam_fillet_active else None
+
+    # Shell Body only applies to panels that actually split -- a panel that
+    # fell through Split Body has no inner cut-plane face to shell from.
+    # plane_geom is captured now (right after the split, before Rounding/
+    # Seam Fillet mutate the body further) since that's the stable plane
+    # description _face_matching_plane will search for later.
+    shell_body_active = bool(shell_body) and shell_thickness is not None and shell_thickness > 0
+    shell_candidates = [] if shell_body_active else None
 
     name_counts = {}
 
@@ -547,6 +808,8 @@ def _create_cut_bodies(component, sketch, vertices, faces, edge_lines, tol, cut_
                 _remove_if_valid(component, pieces[0])  # closer-to-origin piece is the discarded tip
                 working_body = pieces[1]
                 wall_extent = effective_offset  # split: the wall only reaches the cut plane
+                if shell_body_active:
+                    shell_candidates.append((working_body, offset_plane.geometry))
             else:
                 _log('Split Body did not yield 2 pieces for a face; skipping cut for that face.')
 
@@ -627,10 +890,195 @@ def _create_cut_bodies(component, sketch, vertices, faces, edge_lines, tol, cut_
             _log('Seam Fillet could not be applied: {}'.format(traceback.format_exc()))
             seam_fillet_failed = True
 
-    return any_clamped, rounding_ineligible, seam_fillet_failed
+    # Shell runs last, strictly after Seam Fillet -- filleting collects
+    # BRepEdge references up front, and running Shell earlier would
+    # invalidate those references once a face is removed.
+    shell_failed = False
+    if shell_body_active:
+        if not shell_candidates:
+            shell_failed = True
+            _log('Shell Body requested but no panels were eligible (Split Body produced no valid cuts).')
+        for working_body, plane_geom in shell_candidates:
+            if not working_body.isValid:
+                shell_failed = True
+                _log('Shell Body: stored body reference went stale; skipping that panel.')
+                continue
+
+            faces_to_remove = []
+            if shell_faces in ('inside', 'both'):
+                inner_face = _face_matching_plane(working_body, plane_geom, tol)
+                if inner_face is not None:
+                    faces_to_remove.append(inner_face)
+                else:
+                    shell_failed = True
+                    _log('Shell Body: could not locate inner cut-plane face on a panel; skipping.')
+            if shell_faces in ('outside', 'both'):
+                # Same outer-face lookup Seam Fillet already uses -- spherical
+                # cap on Rounded exteriors, flat on Flat.
+                outer_face = _rounded_cap_face(working_body) if rounding_active else _outer_planar_face(working_body)
+                if outer_face is not None:
+                    faces_to_remove.append(outer_face)
+                else:
+                    shell_failed = True
+                    _log('Shell Body: could not locate outer face on a panel; skipping.')
+
+            if not faces_to_remove:
+                continue
+            if not _shell_faces(component, faces_to_remove, shell_thickness, shell_style):
+                shell_failed = True
+
+    return any_clamped, rounding_ineligible, seam_fillet_failed, shell_failed
 
 
-def _seam_fillet_preview(vertices, faces, edge_length, tol, cut_offset, split_body, rounded, seam_tightness):
+def _create_net_panels(component, sketch, faces, net_polygons, edge_length, face_heights, wall_extents,
+                        shell_body, shell_thickness, shell_faces='inside', shell_style='sharp'):
+    # Draws each face's flattened polygon as its OWN independent set of
+    # sketch lines, using that face's own net_polygons[i] coordinates --
+    # deliberately NOT deduped/shared with other faces by global vertex-index
+    # pair. _unfold_net's BFS spanning-tree walk only guarantees matching 2D
+    # coordinates for the specific tree edges it used to hinge a child onto
+    # its parent; a face-adjacency graph generally has far more edges than
+    # the spanning tree does (e.g. a cube: 12 total, only 5 tree edges), and
+    # for the rest, the same global vertex-index pair legitimately lands at
+    # two different 2D positions on its two owning faces (that's what "cuts"
+    # mean in any unfolded net). An earlier version deduped by vertex-index
+    # pair alone and silently reused the WRONG face's line for those
+    # non-tree edges, corrupting that face's edge loop into something
+    # non-planar and making Patch fail with PATCH_NO_TOOLBODY -- confirmed
+    # via live Fusion testing (cube and truncated icosahedron both failed
+    # identically) and reproduced with a standalone pure-math repro of this
+    # exact logic. Drawing every face's edges independently leaves harmless
+    # duplicate coincident lines at true tree edges (the sketch is hidden
+    # after generation anyway) but guarantees every face's Patch input
+    # matches that face's own placement exactly. Each face is patched into a
+    # planar BRepFace (same technique _create_cut_bodies already uses via
+    # _face_edge_collection/_create_patch -- passing raw SketchLines rather
+    # than a Profile/Path sidesteps Fusion's automatic profile detection,
+    # which is unreliable once multiple panels share sketch geometry) and
+    # extruded along its own normal with a taper computed from that face's
+    # apothem/height ratio.
+    lines = sketch.sketchCurves.sketchLines
+    name_counts = {}
+    shell_failed = False
+
+    for face, polygon, height, wall_extent in zip(faces, net_polygons, face_heights, wall_extents):
+        n = len(face)
+        face_edge_lines = {}
+        for k in range(n):
+            i, j = face[k], face[(k + 1) % n]
+            p1 = adsk.core.Point3D.create(polygon[k][0], polygon[k][1], 0)
+            p2 = adsk.core.Point3D.create(polygon[(k + 1) % n][0], polygon[(k + 1) % n][1], 0)
+            line = lines.addByTwoPoints(p1, p2)
+            face_edge_lines[(i, j)] = face_edge_lines[(j, i)] = line
+
+        edge_collection = _face_edge_collection(face, face_edge_lines)
+        base_patch = _create_patch(component, edge_collection)
+        base_body = base_patch.bodies.item(0)
+        base_face = base_body.faces.item(0)
+
+        side_count = len(face)
+        apothem = _apothem(edge_length, side_count)
+        taper = _taper_angle(apothem, height)
+
+        extrudes = component.features.extrudeFeatures
+        extrude_input = extrudes.createInput(base_face, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+        extent = adsk.fusion.DistanceExtentDefinition.create(adsk.core.ValueInput.createByReal(wall_extent))
+        # Fusion's taper convention is positive = flares OUTWARD in the
+        # extrude direction; this panel needs to narrow toward the
+        # polyhedron's apex instead, so the sign is negated -- confirmed via
+        # live Fusion measurement (a positive value here flared a 45x45mm
+        # cube face out to 90x90mm at the far end instead of tapering down).
+        extrude_input.setOneSideExtent(extent, adsk.fusion.ExtentDirections.NegativeExtentDirection,
+                                        adsk.core.ValueInput.createByReal(-taper))
+        extrude_feature = extrudes.add(extrude_input)
+        panel_body = extrude_feature.bodies.item(0)
+
+        # Unlike Bodies mode's Stitch (which consumes its source surfaces
+        # automatically), Extrude doesn't consume the flat patch body it was
+        # built from -- remove it explicitly so it doesn't clutter the
+        # component as an orphaned 0-volume surface body.
+        _remove_if_valid(component, base_body)
+
+        name = _polygon_name(side_count)
+        name_counts[name] = name_counts.get(name, 0) + 1
+        panel_body.name = '{}{}'.format(name, name_counts[name])
+
+        if shell_body and shell_thickness is not None and shell_thickness > 0:
+            # Inner = the far end-cap (tapered toward the apex direction);
+            # outer = the original sketch-plane face (the true polyhedron
+            # face). 'both' opens the panel into a through-tube of just the
+            # tapered side walls.
+            faces_to_shell = []
+            if shell_faces in ('inside', 'both'):
+                if extrude_feature.endFaces.count > 0:
+                    faces_to_shell.append(extrude_feature.endFaces.item(0))
+                else:
+                    shell_failed = True
+            if shell_faces in ('outside', 'both'):
+                if extrude_feature.startFaces.count > 0:
+                    faces_to_shell.append(extrude_feature.startFaces.item(0))
+                else:
+                    shell_failed = True
+
+            if faces_to_shell and not _shell_faces(component, faces_to_shell, shell_thickness, shell_style):
+                shell_failed = True
+
+    return shell_failed
+
+
+def _build_net(component, sketch, vertices, faces, edge_length, tol, cut_offset, split_body, shell_body, shell_thickness,
+                shell_faces='inside', shell_style='sharp'):
+    # Net mode is scoped to the same _circumradius_if_uniform-eligible shapes
+    # as Rounded exterior -- every face must be a genuine regular polygon
+    # (the apothem/taper-angle math assumes it) and every panel's pyramid
+    # height is only well-defined when every vertex sits on one common
+    # circumsphere. Non-eligible shapes get the same graceful-fallback
+    # warning pattern rounding_ineligible already uses.
+    circumradius = _circumradius_if_uniform(vertices, tol)
+    if circumradius is None:
+        if ui:
+            ui.messageBox("Flat Panels isn't available for this shape (its vertices aren't all the same "
+                          "distance from the center).")
+        return
+
+    # A separate, less severe failure mode: the regular-polygon/apothem math
+    # assumes every face's sides are all edge_length. Shapes that violate
+    # this (e.g. a triangular prism's rectangular side faces) can still
+    # produce a usable result for SOME faces -- confirmed via live testing:
+    # the hexagonal prism came out fine except for one end cap needing a
+    # manual flip, while the triangular prism corrupted one face's layout
+    # entirely. Severity clearly varies by shape, so this warns rather than
+    # blocks, unlike the circumradius check above.
+    if not _faces_have_uniform_edge_length(vertices, faces, edge_length, tol):
+        if ui:
+            ui.messageBox("This shape doesn't have a uniform edge length on every face; Flat Panels layout may "
+                          "produce misshapen or misoriented panels for some faces. Inspect the result carefully "
+                          "before using it.")
+
+    face_heights = []
+    for face in faces:
+        normal, _ = _face_normal_and_area(vertices, face)
+        face_heights.append(abs(_vdot(normal, vertices[face[0]])))
+
+    shrink_fraction = None
+    if split_body and cut_offset is not None and cut_offset > 0:
+        shrink_fraction, _ = _cut_shrink_fraction(faces, face_heights, cut_offset)
+    wall_extents = [(shrink_fraction * h if shrink_fraction is not None else h) for h in face_heights]
+
+    net_polygons = _unfold_net(faces, edge_length)
+    if _net_has_overlap(net_polygons):
+        if ui:
+            ui.messageBox("Flat Panels isn't available for this shape (its unfolded panels would overlap).")
+        return
+
+    shell_failed = _create_net_panels(component, sketch, faces, net_polygons, edge_length, face_heights, wall_extents,
+                                       shell_body, shell_thickness, shell_faces, shell_style)
+    if shell_failed and ui:
+        ui.messageBox('Shell Body could not be applied to one or more panels; those panels were left solid.')
+
+
+def _seam_fillet_preview(vertices, faces, edge_length, tol, cut_offset, split_body, rounded, seam_tightness,
+                          shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     # Every value here is computed with the exact same helpers/rules
     # _create_cut_bodies uses for the real thing -- this function creates no
     # Fusion objects and touches no adsk.* API at all, so it's safe to call
@@ -645,9 +1093,13 @@ def _seam_fillet_preview(vertices, faces, edge_length, tol, cut_offset, split_bo
     if split_body and cut_offset is not None and cut_offset > 0:
         shrink_fraction, cut_offset_clamped = _cut_shrink_fraction(faces, face_heights, cut_offset)
 
-    circumradius = _circumradius_if_uniform(vertices, tol) if rounded else None
+    # Computed unconditionally (cheap) since both Rounded exterior and Net
+    # mode's eligibility depend on it.
+    circumradius = _circumradius_if_uniform(vertices, tol)
     rounding_active = bool(rounded) and circumradius is not None
     rounding_ineligible = bool(rounded) and circumradius is None
+    net_ineligible = circumradius is None
+    net_edge_length_warning = not _faces_have_uniform_edge_length(vertices, faces, edge_length, tol)
 
     constant_radius = edge_length * seam_tightness
 
@@ -661,11 +1113,22 @@ def _seam_fillet_preview(vertices, faces, edge_length, tol, cut_offset, split_bo
             by_type[label] = wall_extent * 0.9
         asymmetric = {'offset_two': offset_two, 'by_type': by_type}
 
+    # Shell Body only has a cavity to work with on panels that actually
+    # split -- warn against the tightest (smallest-height) split face, since
+    # that's the one most likely to run out of room first.
+    shell_warning = False
+    if shell_body and shell_thickness is not None and shell_thickness > 0 and shrink_fraction is not None:
+        min_effective_offset = min(shrink_fraction * h for h in face_heights)
+        shell_warning = shell_thickness >= min_effective_offset
+
     return {
         'cut_offset_clamped': cut_offset_clamped,
         'rounding_ineligible': rounding_ineligible,
+        'net_ineligible': net_ineligible,
+        'net_edge_length_warning': net_edge_length_warning,
         'constant_radius': constant_radius,
         'asymmetric': asymmetric,
+        'shell_warning': shell_warning,
     }
 
 
@@ -683,13 +1146,14 @@ def _new_component_sketch(sketch_name, edge_length):
 
 
 def _finish_wireframe(component, sketch, vertices, faces, edge_lines, tol, output_mode, cut_offset, split_body, rounded,
-                       seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                       seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                       shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     if output_mode == 'surface':
         _create_surface_patches(component, faces, edge_lines)
     elif output_mode == 'bodies':
-        any_clamped, rounding_ineligible, seam_fillet_failed = _create_cut_bodies(
+        any_clamped, rounding_ineligible, seam_fillet_failed, shell_failed = _create_cut_bodies(
             component, sketch, vertices, faces, edge_lines, tol, cut_offset, split_body, rounded,
-            seam_fillet, fillet_style, seam_tightness)
+            seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
         if any_clamped and ui:
             ui.messageBox('Cut offset was larger than one or more face heights; it was reduced automatically for those faces.')
         if rounding_ineligible and ui:
@@ -697,13 +1161,16 @@ def _finish_wireframe(component, sketch, vertices, faces, edge_lines, tol, outpu
                           "distance from the center); Flat exterior was used instead.")
         if seam_fillet_failed and ui:
             ui.messageBox('Seam Fillet could not be applied to this shape; the rounded panels were created without it.')
+        if shell_failed and ui:
+            ui.messageBox('Shell Body could not be applied to one or more panels; those panels were left solid.')
 
     sketch.isVisible = False
     return sketch
 
 
 def _draw_wireframe(vertices, edge_length, tol, sketch_name, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                     seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                     seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                     shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     # Orienting is pure math (no adsk.* calls) and never depended on
     # component/sketch, so it can run before _new_component_sketch -- this
     # lets output_mode == 'preview' below return without ever touching the
@@ -713,7 +1180,19 @@ def _draw_wireframe(vertices, edge_length, tol, sketch_name, output_mode='sketch
     if output_mode == 'preview':
         adj = _build_adjacency(vertices, edge_length, tol)
         faces = [f for f in _trace_faces(vertices, adj) if len(f) >= 3]
-        return _seam_fillet_preview(vertices, faces, edge_length, tol, cut_offset, split_body, rounded, seam_tightness)
+        return _seam_fillet_preview(vertices, faces, edge_length, tol, cut_offset, split_body, rounded, seam_tightness,
+                                     shell_body, shell_thickness, shell_faces, shell_style)
+
+    if output_mode == 'net':
+        # Net mode's sketch content is only the flattened 2D layout, not the
+        # true 3D wireframe -- it gets its own early path rather than
+        # falling through the wireframe-line-drawing loop below.
+        adj = _build_adjacency(vertices, edge_length, tol)
+        faces = [f for f in _trace_faces(vertices, adj) if len(f) >= 3]
+        component, sketch = _new_component_sketch(sketch_name, edge_length)
+        _build_net(component, sketch, vertices, faces, edge_length, tol, cut_offset, split_body, shell_body, shell_thickness, shell_faces, shell_style)
+        sketch.isVisible = False
+        return sketch
 
     component, sketch = _new_component_sketch(sketch_name, edge_length)
     lines = sketch.sketchCurves.sketchLines
@@ -733,11 +1212,12 @@ def _draw_wireframe(vertices, edge_length, tol, sketch_name, output_mode='sketch
     adj = _build_adjacency(vertices, edge_length, tol)
     faces = [f for f in _trace_faces(vertices, adj) if len(f) >= 3]
     return _finish_wireframe(component, sketch, vertices, faces, edge_lines, tol, output_mode, cut_offset, split_body, rounded,
-                              seam_fillet, fillet_style, seam_tightness)
+                              seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def _draw_wireframe_from_faces(vertices, faces, edge_length, tol, sketch_name, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                                seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                                seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                                shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     # For shapes with more than one edge length (e.g. kite-faced or elongated
     # solids), distance-based adjacency (_build_adjacency) can't tell edges
     # from diagonals, and _neighbors_by_angle's face tracing assumes every
@@ -751,7 +1231,19 @@ def _draw_wireframe_from_faces(vertices, faces, edge_length, tol, sketch_name, o
     vertices = _orient_by_faces(vertices, faces)
 
     if output_mode == 'preview':
-        return _seam_fillet_preview(vertices, faces, edge_length, tol, cut_offset, split_body, rounded, seam_tightness)
+        return _seam_fillet_preview(vertices, faces, edge_length, tol, cut_offset, split_body, rounded, seam_tightness,
+                                     shell_body, shell_thickness, shell_faces, shell_style)
+
+    if output_mode == 'net':
+        # Every shape currently routed through this explicit-face path is
+        # non-uniform (2 distinct vertex radii), so this will always warn
+        # and no-op via _build_net's own eligibility check -- implemented
+        # anyway for symmetry, in case a future explicit-face shape happens
+        # to be uniform.
+        component, sketch = _new_component_sketch(sketch_name, edge_length)
+        _build_net(component, sketch, vertices, faces, edge_length, tol, cut_offset, split_body, shell_body, shell_thickness, shell_faces, shell_style)
+        sketch.isVisible = False
+        return sketch
 
     component, sketch = _new_component_sketch(sketch_name, edge_length)
     lines = sketch.sketchCurves.sketchLines
@@ -772,7 +1264,7 @@ def _draw_wireframe_from_faces(vertices, faces, edge_length, tol, sketch_name, o
         return sketch
 
     return _finish_wireframe(component, sketch, vertices, faces, edge_lines, tol, output_mode, cut_offset, split_body, rounded,
-                              seam_fillet, fillet_style, seam_tightness)
+                              seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def _even_permutations(values):
@@ -799,7 +1291,8 @@ def _all_permutations(values):
 
 
 def make_truncated_icosahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     phi = (1 + math.sqrt(5)) / 2
     scale = edge_length / 2.0
     base_sets = [
@@ -816,11 +1309,12 @@ def make_truncated_icosahedron(edge_length, tol, output_mode='sketch', cut_offse
                 vertices.add(tuple(round(scale * c, 8) for c in v))
 
     return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Icosahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_icosahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     phi = (1 + math.sqrt(5)) / 2
     raw = []
     for y in [1, -1]:
@@ -837,11 +1331,12 @@ def make_icosahedron(edge_length, tol, output_mode='sketch', cut_offset=None, sp
     scale = edge_length / base_edge
     vertices = [(scale*x, scale*y, scale*z) for x, y, z in raw]
     return _draw_wireframe(vertices, edge_length, tol, 'Icosahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_octahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     a = edge_length / math.sqrt(2)
     vertices = [
         ( a, 0, 0), (-a, 0, 0),
@@ -849,11 +1344,12 @@ def make_octahedron(edge_length, tol, output_mode='sketch', cut_offset=None, spl
         (0, 0,  a), (0, 0, -a),
     ]
     return _draw_wireframe(vertices, edge_length, tol, 'Octahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_tetrahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     s = edge_length / (2 * math.sqrt(2))
     vertices = [
         ( s,  s,  s),
@@ -862,19 +1358,21 @@ def make_tetrahedron(edge_length, tol, output_mode='sketch', cut_offset=None, sp
         (-s, -s,  s),
     ]
     return _draw_wireframe(vertices, edge_length, tol, 'Tetrahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_cube(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     h = edge_length / 2.0
     vertices = [(x, y, z) for x in [h, -h] for y in [h, -h] for z in [h, -h]]
     return _draw_wireframe(vertices, edge_length, tol, 'Cube', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_dodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     phi = (1 + math.sqrt(5)) / 2
     inv_phi = 1 / phi
     raw = []
@@ -896,13 +1394,14 @@ def make_dodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, s
     scale = edge_length / base_edge
     vertices = [(scale*x, scale*y, scale*z) for x, y, z in raw]
     return _draw_wireframe(vertices, edge_length, tol, 'Dodecahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 # ---------- Archimedean solids (all edge-transitive -- uniform-edge _draw_wireframe path) ----------
 
 def make_truncated_tetrahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     scale = edge_length / (2 * math.sqrt(2))
     base = (1, 1, 3)
     vertices = set()
@@ -913,11 +1412,12 @@ def make_truncated_tetrahedron(edge_length, tol, output_mode='sketch', cut_offse
         for v in _even_permutations(signed):
             vertices.add(tuple(round(scale * c, 8) for c in v))
     return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Tetrahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_cuboctahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     scale = edge_length / math.sqrt(2)
     base = (1, 1, 0)
     vertices = set()
@@ -926,11 +1426,12 @@ def make_cuboctahedron(edge_length, tol, output_mode='sketch', cut_offset=None, 
         for v in _even_permutations(signed):
             vertices.add(tuple(round(scale * c, 8) for c in v))
     return _draw_wireframe(sorted(vertices), edge_length, tol, 'Cuboctahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_truncated_cube(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     k = math.sqrt(2) - 1
     scale = edge_length / (2 * k)
     base = (1, 1, k)
@@ -940,11 +1441,12 @@ def make_truncated_cube(edge_length, tol, output_mode='sketch', cut_offset=None,
         for v in _even_permutations(signed):
             vertices.add(tuple(round(scale * c, 8) for c in v))
     return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Cube', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_truncated_octahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     # Base triple (0,1,2) has 3 distinct magnitudes, so it needs the FULL
     # permutation group -- _even_permutations alone would silently produce a
     # different, wrong 12-vertex shape instead of this 24-vertex solid.
@@ -956,11 +1458,12 @@ def make_truncated_octahedron(edge_length, tol, output_mode='sketch', cut_offset
         for v in _all_permutations(signed):
             vertices.add(tuple(round(scale * c, 8) for c in v))
     return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Octahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_rhombicuboctahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     # Archimedean solid, all permutations of (1,1,1+sqrt(2)). Base triple has
     # a repeated value (like cuboctahedron/truncated_cube) so _even_permutations
     # alone reaches every vertex -- verified standalone (V=24 all degree 4,
@@ -974,11 +1477,12 @@ def make_rhombicuboctahedron(edge_length, tol, output_mode='sketch', cut_offset=
         for v in _even_permutations(signed):
             vertices.add(tuple(round(scale * c, 8) for c in v))
     return _draw_wireframe(sorted(vertices), edge_length, tol, 'Rhombicuboctahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_icosidodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     phi = (1 + math.sqrt(5)) / 2
     scale = edge_length  # base edge length is already 1.0 for these base sets
     base_sets = [(0, 0, phi), (0.5, phi / 2, phi * phi / 2)]
@@ -989,11 +1493,12 @@ def make_icosidodecahedron(edge_length, tol, output_mode='sketch', cut_offset=No
             for v in _even_permutations(signed):
                 vertices.add(tuple(round(scale * c, 8) for c in v))
     return _draw_wireframe(sorted(vertices), edge_length, tol, 'Icosidodecahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_truncated_dodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     phi = (1 + math.sqrt(5)) / 2
     base_edge = 2 / phi
     scale = edge_length / base_edge
@@ -1005,7 +1510,7 @@ def make_truncated_dodecahedron(edge_length, tol, output_mode='sketch', cut_offs
             for v in _even_permutations(signed):
                 vertices.add(tuple(round(scale * c, 8) for c in v))
     return _draw_wireframe(sorted(vertices), edge_length, tol, 'Truncated Dodecahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 # ---------- non-uniform-edge shapes (explicit topology, see _draw_wireframe_from_faces) ----------
@@ -1016,7 +1521,8 @@ D3_HEIGHT_TO_SIDE_RATIO = 1.5  # elongation for a fair-rolling d3; no first-prin
 
 
 def make_triangular_prism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     s = edge_length
     h = s * D3_HEIGHT_TO_SIDE_RATIO
     r = s / math.sqrt(3)  # circumradius of an equilateral triangle with side s
@@ -1032,7 +1538,7 @@ def make_triangular_prism(edge_length, tol, output_mode='sketch', cut_offset=Non
     faces = [top_face, bottom_face] + sides
 
     return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Triangular Prism', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def _prism_vertices_and_faces(n, side, height):
@@ -1056,24 +1562,27 @@ def _prism_vertices_and_faces(n, side, height):
 
 
 def make_pentagonal_prism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     vertices, faces = _prism_vertices_and_faces(5, edge_length, edge_length)
     return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Pentagonal Prism', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_hexagonal_prism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     vertices, faces = _prism_vertices_and_faces(6, edge_length, edge_length)
     return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Hexagonal Prism', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_octagonal_prism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     vertices, faces = _prism_vertices_and_faces(8, edge_length, edge_length)
     return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Octagonal Prism', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def _uniform_antiprism_vertices_and_faces(n, edge_length):
@@ -1105,24 +1614,27 @@ def _uniform_antiprism_vertices_and_faces(n, edge_length):
 
 
 def make_square_antiprism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     vertices, faces = _uniform_antiprism_vertices_and_faces(4, edge_length)
     return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Square Antiprism', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_pentagonal_antiprism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     vertices, faces = _uniform_antiprism_vertices_and_faces(5, edge_length)
     return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Pentagonal Antiprism', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_hexagonal_antiprism(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     vertices, faces = _uniform_antiprism_vertices_and_faces(6, edge_length)
     return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Hexagonal Antiprism', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def _antiprism_dual_vertices_and_faces(n, edge_length):
@@ -1163,16 +1675,18 @@ def _antiprism_dual_vertices_and_faces(n, edge_length):
 
 
 def make_pentagonal_trapezohedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     vertices, faces = _antiprism_dual_vertices_and_faces(5, edge_length)
     return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Pentagonal Trapezohedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 # ---------- Experimental ----------
 
 def make_rhombic_dodecahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     # Edge-transitive Catalan solid: cube corners + stretched-octahedron
     # points at exactly 2x the cube's radius -- that 2:1 ratio is what makes
     # all 24 edges equal length and all 12 rhombic faces planar. Despite the
@@ -1187,11 +1701,12 @@ def make_rhombic_dodecahedron(edge_length, tol, output_mode='sketch', cut_offset
     stretched = [(2*u, 0, 0), (-2*u, 0, 0), (0, 2*u, 0), (0, -2*u, 0), (0, 0, 2*u), (0, 0, -2*u)]
     vertices = cube + stretched
     return _draw_wireframe(vertices, edge_length, tol, 'Rhombic Dodecahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_triakis_tetrahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     # Catalan dual of the truncated tetrahedron, derived by reciprocating a
     # real truncated tetrahedron and reading off the resulting numbers
     # (verified standalone, not assumed from memory): 4 "flat" (degree-6)
@@ -1214,11 +1729,12 @@ def make_triakis_tetrahedron(edge_length, tol, output_mode='sketch', cut_offset=
         faces.append([others[2], others[0], apex])
 
     return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Triakis Tetrahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_tetrakis_hexahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     # Catalan dual of the truncated octahedron ("kis cube": a pyramid on each
     # cube face). Derived by reciprocating a real truncated octahedron
     # (same base triple (0,1,2) as make_truncated_octahedron) -- apex sits at
@@ -1244,11 +1760,12 @@ def make_tetrakis_hexahedron(edge_length, tol, output_mode='sketch', cut_offset=
         [7, 3, 13], [3, 1, 13], [1, 5, 13], [5, 7, 13],
     ]
     return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Tetrakis Hexahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_rhombic_triacontahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     # Catalan dual of the icosidodecahedron. Coordinates derived by literally
     # reciprocating a real (unit-edge) icosidodecahedron -- built from this
     # file's own make_icosidodecahedron base_sets/permutation logic, traced
@@ -1294,11 +1811,12 @@ def make_rhombic_triacontahedron(edge_length, tol, output_mode='sketch', cut_off
     scale = edge_length / raw_edge
     vertices = [tuple(c * scale for c in v) for v in raw]
     return _draw_wireframe(vertices, edge_length, tol, 'Rhombic Triacontahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 def make_stellated_octahedron(edge_length, tol, output_mode='sketch', cut_offset=None, split_body=True, rounded=False,
-                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0):
+                    seam_fillet=False, fillet_style='constant', seam_tightness=1.0,
+                    shell_body=False, shell_thickness=None, shell_faces='inside', shell_style='sharp'):
     # Stella octangula: a compound of 2 tetrahedra, the second being the
     # first negated through the origin. Both share the origin as their
     # centroid, so each of the 8 total faces still lofts cleanly to the
@@ -1318,7 +1836,7 @@ def make_stellated_octahedron(edge_length, tol, output_mode='sketch', cut_offset
         [6, 7, 5], [7, 6, 4], [5, 7, 4], [6, 5, 4],
     ]
     return _draw_wireframe_from_faces(vertices, faces, edge_length, tol, 'Stellated Octahedron', output_mode, cut_offset, split_body, rounded,
-                                          seam_fillet, fillet_style, seam_tightness)
+                                          seam_fillet, fillet_style, seam_tightness, shell_body, shell_thickness, shell_faces, shell_style)
 
 
 SHAPE_REGISTRY = {
@@ -1545,17 +2063,28 @@ class PaletteIncomingHandler(adsk.core.HTMLEventHandler):
                 # momentarily empty numeric field) must be skipped quietly,
                 # never surfaced as the top-level except's messageBox below.
                 try:
-                    edge = float(data.get('edge', 20.0)) * MM_TO_CM
+                    edge = float(data.get('edge', 44.0)) * MM_TO_CM
                     tol = float(data.get('tol', 0.1)) * MM_TO_CM
                     cut_offset = data.get('cut_offset', None)
                     cut_offset = float(cut_offset) * MM_TO_CM if cut_offset not in (None, '') else None
                     split_body = bool(data.get('split_body', True))
                     rounded = data.get('exterior_style', 'flat') == 'rounded'
                     seam_tightness = float(data.get('seam_tightness', 1.0))
+                    shell_body = bool(data.get('shell_body', False))
+                    shell_thickness = data.get('wall_thickness', None)
+                    shell_thickness = float(shell_thickness) * MM_TO_CM if shell_thickness not in (None, '') else None
+                    shell_faces = data.get('shell_faces', 'inside')
+                    if shell_faces not in ('inside', 'outside', 'both'):
+                        shell_faces = 'inside'
+                    shell_style = data.get('shell_style', 'sharp')
+                    if shell_style not in ('sharp', 'rounded'):
+                        shell_style = 'sharp'
 
                     builder = SHAPE_REGISTRY[category]['shapes'][shape]['builder']
                     preview = builder(edge, tol, output_mode='preview', cut_offset=cut_offset, split_body=split_body,
-                                      rounded=rounded, seam_tightness=seam_tightness)
+                                      rounded=rounded, seam_tightness=seam_tightness,
+                                      shell_body=shell_body, shell_thickness=shell_thickness, shell_faces=shell_faces,
+                                      shell_style=shell_style)
                 except (KeyError, ValueError):
                     return
 
@@ -1565,8 +2094,11 @@ class PaletteIncomingHandler(adsk.core.HTMLEventHandler):
                 response = {
                     'cut_offset_clamped': preview['cut_offset_clamped'],
                     'rounding_ineligible': preview['rounding_ineligible'],
+                    'net_ineligible': preview['net_ineligible'],
+                    'net_edge_length_warning': preview['net_edge_length_warning'],
                     'constant_radius': preview['constant_radius'] / MM_TO_CM,
                     'asymmetric': None,
+                    'shell_warning': preview['shell_warning'],
                 }
                 if preview['asymmetric'] is not None:
                     response['asymmetric'] = {
@@ -1580,11 +2112,11 @@ class PaletteIncomingHandler(adsk.core.HTMLEventHandler):
             if action == 'create_shape':
                 category = data.get('category', '')
                 shape = data.get('shape', '')
-                edge = float(data.get('edge', 20.0)) * MM_TO_CM
+                edge = float(data.get('edge', 44.0)) * MM_TO_CM
                 tol = float(data.get('tol', 0.1)) * MM_TO_CM
 
                 output_mode = data.get('output_mode', 'sketch')
-                if output_mode not in ('sketch', 'surface', 'bodies'):
+                if output_mode not in ('sketch', 'surface', 'bodies', 'net'):
                     output_mode = 'sketch'
                 cut_offset = data.get('cut_offset', None)
                 cut_offset = float(cut_offset) * MM_TO_CM if cut_offset not in (None, '') else None
@@ -1595,6 +2127,15 @@ class PaletteIncomingHandler(adsk.core.HTMLEventHandler):
                 if fillet_style not in ('constant', 'asymmetric'):
                     fillet_style = 'constant'
                 seam_tightness = float(data.get('seam_tightness', 1.0))
+                shell_body = bool(data.get('shell_body', False))
+                shell_thickness = data.get('wall_thickness', None)
+                shell_thickness = float(shell_thickness) * MM_TO_CM if shell_thickness not in (None, '') else None
+                shell_faces = data.get('shell_faces', 'inside')
+                if shell_faces not in ('inside', 'outside', 'both'):
+                    shell_faces = 'inside'
+                shell_style = data.get('shell_style', 'sharp')
+                if shell_style not in ('sharp', 'rounded'):
+                    shell_style = 'sharp'
                 group_timeline = bool(data.get('group_timeline', False))
 
                 if not category or not shape:
@@ -1608,7 +2149,9 @@ class PaletteIncomingHandler(adsk.core.HTMLEventHandler):
                 builder = SHAPE_REGISTRY[category]['shapes'][shape]['builder']
                 start_time = time.time()
                 builder(edge, tol, output_mode=output_mode, cut_offset=cut_offset, split_body=split_body, rounded=rounded,
-                        seam_fillet=seam_fillet, fillet_style=fillet_style, seam_tightness=seam_tightness)
+                        seam_fillet=seam_fillet, fillet_style=fillet_style, seam_tightness=seam_tightness,
+                        shell_body=shell_body, shell_thickness=shell_thickness, shell_faces=shell_faces,
+                        shell_style=shell_style)
                 elapsed = time.time() - start_time
 
                 if group_timeline:
