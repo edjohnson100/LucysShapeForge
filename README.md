@@ -4,13 +4,18 @@
 
 **Author:** Ed Johnson (Making With An EdJ)
 
-**Version:** v1.2.0
+**Version:** v1.3.0
 
 <img src="Lucys_Shape_Forge_AppIcon.png" alt="Lucy's Shapr Forge Logo Icon" width="400">
 
 Lucy's Shape Forge is a Fusion add-in that adds a toolbar button opening a small HTML palette. Once installed and running, you'll find it in the **Utilities** tab (a top-level tab alongside Solid, Surface, Mesh, etc.) — either as a toolbar icon right next to the **ADD-INS** panel's dropdown, or by selecting **Utilities → Add-Ins dropdown → Lucy's Shape Forge**. Pick a polyhedron, set an edge length, and generate it directly in your design — as a wireframe sketch, a set of surface patches, a set of solid bodies, or a flat 3D-print-ready panel layout.
 
-## 🆕 What's New in v1.2.0
+## 🆕 What's New in v1.3.0
+
+- **Pentagonal Hexecontahedron** — the dual of the (chiral) Snub Dodecahedron, with 60 irregular pentagonal faces twisted around the sphere. Vertex coordinates were independently verified and numerically planarized offline so every face's sketch profile is exactly flat and selectable in Fusion, not just close enough for Patch/Thicken to tolerate — see [`Archive/Pentagonal_Hexecontahedron_Research.md`](Archive/Pentagonal_Hexecontahedron_Research.md) for the full derivation writeup.
+- **Fix:** Shell Body no longer fails with an error when used in Bodies (Pyramids) mode with Split Body unchecked — Shell Body only ever applies to split panels, so it's now correctly skipped instead of attempted in that case.
+
+## What's New in v1.2.0
 
 - **Flat Panels output mode** — lays every face out as a flat, edge-to-edge 2D net in one sketch (like an unfolded soccer ball), then extrudes each panel with a taper angle so the printed result matches that face's true frustum shape from Bodies mode. Only available for shapes where every vertex is the same distance from center; a separate, non-blocking warning flags shapes with non-uniform face edge lengths (e.g. the D3 triangular prism), where some panels may still come out misshapen.
 - **Shell Body** — hollow out split panels (Bodies or Flat Panels) into a thin-walled cavity of a chosen **Wall Thickness**, instead of a solid wedge.
@@ -26,7 +31,7 @@ Lucy's Shape Forge is a Fusion add-in that adds a toolbar button opening a small
   - **Polyhedra** — the 5 Platonic solids, Truncated Icosahedron (soccer-ball shape), and Pentagonal Trapezohedron.
   - **Prisms & Antiprisms** — Triangular, Pentagonal, Hexagonal, and Octagonal Prisms; Square, Pentagonal, and Hexagonal Antiprisms.
   - **Archimedean Solids** — Truncated Tetrahedron, Cuboctahedron, Truncated Cube, Truncated Octahedron, Rhombicuboctahedron, Icosidodecahedron, Truncated Dodecahedron, Truncated Icosahedron.
-  - **Catalan / Dual Solids** — Rhombic Dodecahedron, Triakis Tetrahedron, Tetrakis Hexahedron, Rhombic Triacontahedron.
+  - **Catalan / Dual Solids** — Rhombic Dodecahedron, Triakis Tetrahedron, Tetrakis Hexahedron, Rhombic Triacontahedron, Pentagonal Hexecontahedron.
   - **Experimental** — Stellated Octahedron, plus curated repeats of the Rhombic Dodecahedron and Triakis Tetrahedron.
 - **Shape info panel**: selecting a shape shows its face/vertex counts and a short description right in the palette.
 - **Auto-orientation**: every shape is rotated so its largest face sits flat, parallel to the ground plane, while staying centered on the origin.
